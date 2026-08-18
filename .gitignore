@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# 本地配置与隐私文件（不应进入仓库）
+.env
+kb-mcp/config.yaml
+
+# 用户知识卡片（包含个人学习内容）
+cards/
+kb-mcp/cards/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 测试临时文件
+.pytest_cache/
+htmlcov/
+.coverage

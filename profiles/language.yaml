@@ -1,0 +1,93 @@
+# 随手学 Open — 语言学习 Profile
+# 适用于学习英语、日语等语言的词汇与表达
+
+name: "language"
+display_name: "语言学习"
+description: "适用于学习英语、日语等语言的词汇与表达（语法知识建议使用 general Profile 或未来的 grammar Profile）"
+version: "0.1"
+min_schema_version: "0.1"
+
+category_required: true
+categories:
+  - "基础词汇"
+  - "进阶词汇"
+  - "语法"
+  - "日常表达"
+  - "学术用语"
+
+slots:
+  know:
+    label: "知"
+    fields:
+      - name: "word"
+        label: "单词/表达"
+        required: true
+        hint: "要学习的单词、短语或表达方式"
+      - name: "pronunciation"
+        label: "音标/发音"
+        required: true
+        hint: "国际音标或假名注音，如 /prəˌnʌnsiˈeɪʃən/"
+      - name: "part_of_speech"
+        label: "词性"
+        required: true
+        hint: "名词(n.)、动词(v.)、形容词(adj.) 等，一词多性时逐一列出"
+      - name: "meaning"
+        label: "词义"
+        required: true
+        hint: "列出主要含义，按使用频率从高到低排列"
+
+  understand:
+    label: "解"
+    fields:
+      - name: "example_sentences"
+        label: "例句"
+        required: true
+        hint: "至少两个不同语境的例句：一个日常口语场景，一个正式书面场景"
+      - name: "context_usage"
+        label: "语境与用法"
+        required: true
+        hint: "这个词通常在什么场景下使用？有没有语体限制（口语/书面/正式/非正式）？"
+      - name: "common_collocations"
+        label: "常见搭配"
+        required: false
+        hint: "固定搭配和常见短语，如 make a decision、take into account"
+
+  connect:
+    label: "联"
+    fields:
+      - name: "synonyms"
+        label: "同类词/近义词"
+        required: true
+        hint: "意思相近的词，并简要说明它们之间的细微区别"
+      - name: "confusable_words"
+        label: "易混词"
+        required: false
+        hint: "拼写或发音相近但意思不同的词，如 affect vs. effect"
+      - name: "word_family"
+        label: "词族/派生词"
+        required: false
+        hint: "同根词和派生形式，如 create → creative → creativity → creation"
+
+  verify:
+    label: "验"
+    fields:
+      - name: "compose_sentence"
+        label: "造句练习"
+        required: true
+        hint: "用该词的一个引申义或不常见搭配造句，避免最简单直白的用法"
+      - name: "listening"
+        label: "听辨"
+        required: false
+        hint: "容易听错的发音陷阱，或与其他词发音混淆的情况"
+      - name: "spelling_notes"
+        label: "拼写注意"
+        required: false
+        hint: "容易拼错的部分，如双写字母、不发音字母等"
+
+ai_instructions: |
+  例句应覆盖日常和正式两种语境，让学习者感受同一个词在不同场合的使用差异。
+  优先展示该词最常用的含义和搭配，生僻义放在后面。
+  如有常见谚语或固定表达包含该词，应收录在例句或常见搭配中。
+  近义词对比时要说明使用场景的区别，不能只列出词不加解释。
+  造句练习应鼓励使用引申义或高级搭配，避免学习者停留在最基础的用法上。
+  如果该词有英美发音差异，应在音标中标注。

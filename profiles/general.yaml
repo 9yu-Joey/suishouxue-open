@@ -1,0 +1,71 @@
+# 随手学 Open — 通用学习 Profile
+# 适用于任何学科的通用学习模板
+
+name: "general"
+display_name: "通用学习"
+description: "适用于任何学科的通用学习模板，最小公约数设计"
+version: "0.1"
+min_schema_version: "0.1"
+
+category_required: false
+categories:
+  - "通识"
+  - "生活技能"
+  - "职业发展"
+  - "其他"
+
+slots:
+  know:
+    label: "知"
+    fields:
+      - name: "definition"
+        label: "定义"
+        required: true
+        hint: "用一两句话概括这个概念是什么"
+      - name: "key_facts"
+        label: "核心要点"
+        required: false
+        hint: "列出最关键的几个事实或特征"
+
+  understand:
+    label: "解"
+    fields:
+      - name: "explanation"
+        label: "用自己的话解释"
+        required: true
+        hint: "假装在跟朋友聊天，用最自然的方式解释这个概念"
+      - name: "analogy"
+        label: "类比"
+        required: false
+        hint: "能不能用一个生活中的东西来打比方？"
+
+  connect:
+    label: "联"
+    fields:
+      - name: "related_concepts"
+        label: "关联概念"
+        required: true
+        hint: "这个概念和哪些你已经知道的东西有关系？"
+      - name: "use_cases"
+        label: "应用场景"
+        required: false
+        hint: "这个概念在什么场景下会被用到？"
+
+  verify:
+    label: "验"
+    fields:
+      - name: "self_test"
+        label: "自测问题"
+        required: true
+        hint: "给自己出一道题，检验是否真正理解了"
+      - name: "practice"
+        label: "实践练习"
+        required: false
+        hint: "有没有可以动手试试的小练习？"
+
+ai_instructions: |
+  保持解释简单易懂，使用日常语言。
+  不要假设用户具备任何专业背景知识。
+  类比应来自日常生活，避免使用专业术语解释专业术语。
+  自测问题应该能在不查资料的情况下凭理解作答。
+  如果用户没有指定分类，不要强制归类。

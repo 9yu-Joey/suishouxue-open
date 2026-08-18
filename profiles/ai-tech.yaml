@@ -1,0 +1,99 @@
+# 随手学 Open — AI 与技术学习 Profile
+# 基于九聿的个人学习方法论设计
+
+name: "ai-tech"
+display_name: "AI 与技术学习"
+description: "适用于学习 AI、编程、互联网技术等概念"
+version: "0.1"
+min_schema_version: "0.1"
+
+category_required: true
+categories:
+  - "计算机与互联网"
+  - "AI与数据科学"
+  - "工具与平台"
+
+slots:
+  know:
+    label: "知"
+    fields:
+      - name: "definition"
+        label: "定义"
+        required: true
+        hint: "用一两句话说清楚这个技术概念是什么"
+      - name: "english_full"
+        label: "英文全称"
+        required: true
+        hint: "缩写展开，如 API = Application Programming Interface"
+      - name: "chinese_translation"
+        label: "中文翻译"
+        required: true
+        hint: "常用的中文译名，如有多个译法可一并列出"
+      - name: "pronunciation"
+        label: "发音"
+        required: true
+        hint: "音标 + 中文谐音辅助记忆，如 API /ˌeɪ.piːˈaɪ/（诶-劈-爱）"
+      - name: "literal_meaning"
+        label: "字面直译"
+        required: false
+        hint: "把英文名逐词翻译，帮助理解命名逻辑，如 Application Programming Interface → 应用程序-编程-接口"
+      - name: "naming_reason"
+        label: "为什么叫这个名字"
+        required: false
+        hint: "这个名字的来历或命名动机是什么？有没有背后的故事？"
+
+  understand:
+    label: "解"
+    fields:
+      - name: "analogy"
+        label: "类比"
+        required: true
+        hint: "用生活中的东西打个比方，避免用技术解释技术。比如：API 就像餐厅的菜单——你不需要知道厨房怎么做菜，只需要看菜单点菜就行"
+      - name: "why_exists"
+        label: "为什么会出现"
+        required: false
+        hint: "这个技术解决了什么问题？在它出现之前人们是怎么做的？"
+      - name: "project_example"
+        label: "项目实例"
+        required: false
+        hint: "在随手学或其他实际项目中的应用，让概念落地到真实场景"
+
+  connect:
+    label: "联"
+    fields:
+      - name: "prerequisites"
+        label: "前置知识"
+        required: true
+        hint: "理解这个概念之前，需要先知道哪些东西？"
+      - name: "related_concepts"
+        label: "关联概念"
+        required: true
+        hint: "和这个概念经常一起出现、容易混淆、或有上下游关系的概念"
+      - name: "applications"
+        label: "应用场景"
+        required: false
+        hint: "这个技术在哪些实际场景中会被用到？"
+
+  verify:
+    label: "验"
+    fields:
+      - name: "self_test"
+        label: "自测问题"
+        required: true
+        hint: "用自己的话向不懂技术的朋友解释这个概念，看看能不能讲清楚"
+      - name: "scenario_judgment"
+        label: "判断场景题"
+        required: true
+        hint: "给一个实际场景，判断该不该用这个技术。比如：你要做一个天气查询小程序，需不需要用到 API？为什么？"
+      - name: "classic_example"
+        label: "经典例子"
+        required: false
+        hint: "业界最知名的使用案例，帮助建立直觉"
+
+ai_instructions: |
+  英文术语首次出现时必须补全：全称、发音、中文谐音、字面直译。
+  例如：API（Application Programming Interface，/ˌeɪ.piːˈaɪ/，谐音"诶劈爱"，字面意思"应用程序编程接口"）。
+  类比优先使用生活场景（餐厅、快递、图书馆等），严禁用另一个技术概念解释技术概念。
+  自测问题应包含至少一个判断场景题，让学习者在真实情境中做决策。
+  如果概念有常见的误解或易混淆的相近概念，应在关联概念中特别标注。
+  前置知识应按学习顺序排列，帮助学习者判断自己是否准备好学这个概念。
