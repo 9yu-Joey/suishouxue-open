@@ -11,7 +11,7 @@
 ## 第一步：获取代码
 
 ```bash
-git clone https://github.com/jiuyu-shenshi/suishouxue-open.git
+git clone https://github.com/9yu-Joey/suishouxue-open.git
 cd suishouxue-open/kb-mcp
 ```
 

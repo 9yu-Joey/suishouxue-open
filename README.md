@@ -84,9 +84,14 @@ MCP 服务端：让 AI 能够按照规则自动创建和维护知识卡片。
 
 ---
 
-## 当前版本：Lite
+## 版本选择
 
-Lite 使用 MCP 服务端和本地 Markdown 文件，不依赖在线服务，五分钟即可开始。
+| 版本 | 适合谁 | 能做什么 |
+|------|--------|----------|
+| **Lite** | 刚开始用，想五分钟跑起来 | 本地 Markdown 卡片 + MCP 服务，不依赖任何在线服务 |
+| **Pro**（可选） | 想多设备同步、留修改历史、分享部分卡片 | 在 Lite 基础上：卡片存进你自己的私有 Git 仓库；把带 `public` 标签的卡片生成网站，部署到 GitHub Pages |
+
+Pro 默认关闭，不开启就和 Lite 完全一样。详见 [Pro：同步与展示](docs/05-Pro-同步与展示.md)。
 
 ---
 
@@ -174,7 +179,8 @@ suishouxue-open/
 │   ├── 01-随手学是什么.md
 │   ├── 02-Lite-快速上手.md
 │   ├── 03-卡片规范详解.md
-│   └── 04-常见问题与排错.md
+│   ├── 04-常见问题与排错.md
+│   └── 05-Pro-同步与展示.md
 │
 ├── kb-mcp/
 │   ├── server.py            ← MCP 服务端
@@ -182,10 +188,17 @@ suishouxue-open/
 │   ├── config.example.yaml  ← 配置示例
 │   ├── .env.example         ← 环境变量示例
 │   ├── requirements.txt     ← Python 依赖
+│   ├── requirements-pro.txt ← Pro 静态站点依赖（可选）
+│   ├── kbcore.py            ← 配置与卡片解析（共用）
+│   ├── git_sync.py          ← Pro：Git 同步
+│   ├── build_site.py        ← Pro：静态站点生成
+│   ├── templates/
+│   │   └── github-pages.yml ← Pro：GitHub Pages 发布模板
 │   └── README.md            ← MCP 文档
 │
 └── tests/
-    └── test_basic_save.py   ← 基础测试
+    ├── test_basic_save.py   ← 基础测试
+    └── test_pro.py          ← Pro 测试
 ```
 
 ---
@@ -198,6 +211,7 @@ suishouxue-open/
 | [Lite 快速上手](docs/02-Lite-快速上手.md) | 五分钟从零开始 |
 | [卡片规范详解](docs/03-卡片规范详解.md) | Core Schema + Profile 完整解读 |
 | [常见问题与排错](docs/04-常见问题与排错.md) | FAQ 和 troubleshooting |
+| [Pro：同步与展示](docs/05-Pro-同步与展示.md) | 私有 Git 仓库同步、GitHub Pages 知识卡网站 |
 
 ---
 

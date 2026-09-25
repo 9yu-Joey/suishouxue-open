@@ -27,13 +27,13 @@ AI 客户端（Claude、ChatGPT 等）通信。
   kb_update — 按 id 更新已有卡片
   kb_search — 按关键词搜索卡片
   kb_guide  — 加载 Profile 字段定义，引导 AI 生成卡片
+  kb_sync   — （Pro，可选）与用户自己的私有 Git 仓库同步卡片
 
 要求 Python 3.10+
 """
 
 from __future__ import annotations
 
-import os
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -41,6 +41,16 @@ from pathlib import Path
 
 import yaml
 from mcp.server import MCPServer
+
+import git_sync
+from kbcore import (
+    BASE_DIR,
+    CARD_ID_RE,
+    load_config,
+    parse_body,
+    parse_frontmatter,
+    resolve_path,
+)
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -51,58 +61,22 @@ CORE_SCHEMA_VERSION = "0.1"
 # Profile 名称白名单正则：只允许小写字母、数字、连字符
 _PROFILE_NAME_RE = re.compile(r"^[a-z][a-z0-9\-]{0,63}$")
 
-# id 允许字符：小写字母、数字、连字符、CJK 等 Unicode 字符
-# 与 _slugify() 产出一致：首字符为小写字母，后续为 Unicode 字母/数字/连字符
-_CARD_ID_RE = re.compile(r"^[a-z][\w\-]{0,127}$", re.UNICODE)
+_CARD_ID_RE = CARD_ID_RE
 
 # ---------------------------------------------------------------------------
-# 配置加载
+# 配置加载（逻辑在 kbcore.py，与 build_site.py 共用）
 # ---------------------------------------------------------------------------
 
-_BASE_DIR = Path(__file__).resolve().parent  # kb-mcp/ 目录
-
-
-def load_config() -> dict:
-    """加载配置文件 config.yaml，如不存在则使用默认值。
-
-    所有相对路径统一以 server.py 所在目录 (kb-mcp/) 为基准解析。
-    环境变量可覆盖配置文件中的对应设置。
-    """
-    config_path = _BASE_DIR / "config.yaml"
-    if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as fh:
-            config = yaml.safe_load(fh) or {}
-    else:
-        config = {}
-
-    # 默认值
-    config.setdefault("cards_dir", "./cards")
-    config.setdefault("profiles_dir", "../profiles")
-    config.setdefault("default_profile", "general")
-
-    # 环境变量覆盖
-    if os.environ.get("SUISHOUXUE_CARDS_DIR"):
-        config["cards_dir"] = os.environ["SUISHOUXUE_CARDS_DIR"]
-    if os.environ.get("SUISHOUXUE_PROFILES_DIR"):
-        config["profiles_dir"] = os.environ["SUISHOUXUE_PROFILES_DIR"]
-    if os.environ.get("SUISHOUXUE_DEFAULT_PROFILE"):
-        config["default_profile"] = os.environ["SUISHOUXUE_DEFAULT_PROFILE"]
-
-    return config
-
-
-def _resolve_path(raw: str) -> Path:
-    """将配置中的路径解析为绝对路径（相对路径以 _BASE_DIR 为基准）。"""
-    p = Path(raw)
-    if p.is_absolute():
-        return p
-    return (_BASE_DIR / p).resolve()
-
+_BASE_DIR = BASE_DIR  # kb-mcp/ 目录
+_resolve_path = resolve_path
+_parse_frontmatter = parse_frontmatter
+_parse_body = parse_body
 
 CONFIG = load_config()
 CARDS_DIR = _resolve_path(CONFIG["cards_dir"])
 PROFILES_DIR = _resolve_path(CONFIG["profiles_dir"])
 DEFAULT_PROFILE = CONFIG["default_profile"]
+SYNC = CONFIG["sync"]  # Pro：Git 同步设置，默认 enabled=False
 
 
 # ---------------------------------------------------------------------------
@@ -190,29 +164,6 @@ def _find_card_by_id(card_id: str) -> Path | None:
         if fm and fm.get("id") == card_id:
             return md_file
     return None
-
-
-def _parse_frontmatter(text: str) -> dict | None:
-    """从 Markdown 文本中解析 YAML frontmatter。"""
-    if not text.startswith("---"):
-        return None
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return None
-    try:
-        return yaml.safe_load(parts[1]) or {}
-    except yaml.YAMLError:
-        return None
-
-
-def _parse_body(text: str) -> str:
-    """提取 frontmatter 之后的正文。"""
-    if not text.startswith("---"):
-        return text
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return text
-    return parts[2].lstrip("\n")
 
 
 def _collision_safe_filename(card_id: str) -> str:
@@ -356,7 +307,12 @@ def kb_save(
         if not content.endswith("\n"):
             fh.write("\n")
 
-    return {"status": "saved", "path": str(filepath), "id": card_id}
+    result = {"status": "saved", "path": str(filepath), "id": card_id}
+    if SYNC["enabled"]:
+        result["sync"] = git_sync.record_change(
+            CARDS_DIR, filepath, f"kb: 新增卡片 {card_id}"
+        )
+    return result
 
 
 @mcp.tool()
@@ -479,7 +435,12 @@ def kb_update(
         if not new_body.endswith("\n"):
             fh.write("\n")
 
-    return {"status": "updated", "path": str(card_path), "id": id}
+    result = {"status": "updated", "path": str(card_path), "id": id}
+    if SYNC["enabled"]:
+        result["sync"] = git_sync.record_change(
+            CARDS_DIR, card_path, f"kb: 更新卡片 {id}"
+        )
+    return result
 
 
 @mcp.tool()
@@ -575,6 +536,39 @@ def kb_guide(profile: str | None = None) -> dict:
         "available_profiles": _list_profiles(),
         "schema_version": CORE_SCHEMA_VERSION,
     }
+
+
+@mcp.tool()
+def kb_sync(action: str = "sync") -> dict:
+    """（Pro）把卡片目录与你自己的私有 Git 仓库同步。
+
+    需要在配置中开启 sync.enabled，并且卡片目录本身是一个配置了 remote 的
+    Git 仓库。kb_save / kb_update 只做本地提交，只有调用本工具才会联网。
+
+    同步顺序：提交手动改过的卡片 → fetch → merge → push。
+    遇到冲突会取消合并并列出冲突文件，不会覆盖任何卡片；推送失败时本地
+    提交会保留，可再次调用重试。
+
+    Args:
+        action: "sync"（默认，执行同步）或 "status"（只查看本地状态，不联网）
+
+    Returns:
+        包含 status 的字典。status 可能为 ok / conflict / merge_failed /
+        push_failed / fetch_failed / no_remote / not_repo / dirty / disabled /
+        error；status 模式下为 ready / no_remote / not_repo。
+    """
+    if action not in ("sync", "status"):
+        raise ValueError("action 只能是 'sync' 或 'status'")
+    if not SYNC["enabled"]:
+        return {
+            "status": "disabled",
+            "message": "Git 同步未启用。在 config.yaml 中设置 sync.enabled: true，"
+                       "或设置环境变量 SUISHOUXUE_SYNC_ENABLED=true。"
+                       "详见 docs/05-Pro-同步与展示.md。",
+        }
+    if action == "status":
+        return git_sync.status(CARDS_DIR, SYNC["remote"], SYNC["branch"])
+    return git_sync.sync(CARDS_DIR, SYNC["remote"], SYNC["branch"])
 
 
 # ---------------------------------------------------------------------------

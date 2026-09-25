@@ -5,8 +5,7 @@
 #   cp config.example.yaml config.yaml
 #
 # 所有相对路径以 kb-mcp/ 目录为基准解析。也可使用绝对路径。
-# 环境变量 SUISHOUXUE_CARDS_DIR / SUISHOUXUE_PROFILES_DIR /
-# SUISHOUXUE_DEFAULT_PROFILE 可覆盖以下对应设置。
+# 以 SUISHOUXUE_ 开头的环境变量可覆盖以下对应设置（见 .env.example）。
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -36,5 +35,29 @@ search:
   case_sensitive: false
 
 # ---------------------------------------------------------------------------
-# 未来功能与发布计划请关注项目 CHANGELOG 和 GitHub Releases。
+# Pro：Git 同步（可选，默认关闭）
+#
+# 开启前，cards_dir 必须是一个独立的 Git 仓库（建议是你自己的 private 仓库），
+# 并已用 `git remote add` 配好远端。认证交给你自己的 SSH key 或
+# Git credential helper —— 不要把 token 写进这里。
+# 详见 docs/05-Pro-同步与展示.md
 # ---------------------------------------------------------------------------
+sync:
+  # true = kb_save / kb_update 后自动本地提交，并可用 kb_sync 同步
+  enabled: false
+
+  # Git remote 名称（不是 URL）
+  remote: "origin"
+
+  # 远端分支
+  branch: "main"
+
+# ---------------------------------------------------------------------------
+# Pro：静态站点（build_site.py）
+#
+# 只有 tags 里带 publish_tag 的卡片会被生成。私有仓库 ≠ 私有网站。
+# ---------------------------------------------------------------------------
+site:
+  publish_tag: "public"
+  title: "我的随手学知识库"
+  output_dir: "./site"

@@ -19,7 +19,7 @@ pip install -r requirements.txt
 cp config.example.yaml config.yaml
 ```
 
-根据需要编辑 `config.yaml`，默认配置即可直接使用。也可通过环境变量 `SUISHOUXUE_CARDS_DIR`、`SUISHOUXUE_PROFILES_DIR`、`SUISHOUXUE_DEFAULT_PROFILE` 覆盖配置。
+根据需要编辑 `config.yaml`，默认配置即可直接使用。也可通过环境变量 `SUISHOUXUE_CARDS_DIR`、`SUISHOUXUE_PROFILES_DIR`、`SUISHOUXUE_DEFAULT_PROFILE` 覆盖配置（Pro 相关变量见 `.env.example`）。环境变量需要在启动 server 的环境里设置，例如写进 MCP 客户端配置的 `env` 字段。
 
 ### 3. 健康检查
 
@@ -46,6 +46,16 @@ python server.py
 | **kb_update** | 按 id 更新卡片内容或元信息，保留 created、刷新 updated |
 | **kb_search** | 按关键词搜索卡片，返回 id/title/profile 和命中附近的摘要 |
 | **kb_guide** | 加载 Profile YAML，返回字段定义，引导 AI 按模板生成卡片 |
+| **kb_sync** | （Pro，可选）与你自己的私有 Git 仓库同步卡片；`action="status"` 只看本地状态 |
+
+## Pro（可选）
+
+Pro 默认关闭，关闭时与 Lite 行为完全一致。
+
+- **Git 同步**：在 `config.yaml` 中设置 `sync.enabled: true`（或环境变量 `SUISHOUXUE_SYNC_ENABLED=true`），并让 `cards_dir` 指向一个独立的 Git 仓库。`kb_save` / `kb_update` 成功后自动做本地提交，`kb_sync` 负责 fetch → merge → push。冲突时取消合并、保留本地卡片；推送失败时保留本地提交；永不 force push。认证交给你自己的 SSH key 或 credential helper，随手学不保存任何凭据。
+- **静态站点**：`pip install -r requirements-pro.txt` 后运行 `python build_site.py --cards <卡片目录> --out ./site`。只有 tags 带 `public` 的卡片会被生成。部署模板见 `templates/github-pages.yml`。
+
+完整教程：[Pro：同步与展示](../docs/05-Pro-同步与展示.md)
 
 ## 连接 AI 客户端
 
@@ -74,7 +84,7 @@ ChatGPT 桌面端和 Codex CLI 均支持 MCP stdio 传输，配置方式类似�
 
 ## 版本说明
 
-v0.1 提供本地 Markdown 存储与 MCP stdio 服务。
+v0.1 提供本地 Markdown 存储与 MCP stdio 服务。Pro 在此基础上增加可选的 Git 同步和静态站点生成。
 
 ## 许可证
 
