@@ -1,0 +1,12 @@
+# 随手学 Private · Caddy 反向代理
+# 域名来自 deploy/.env 的 SUISHOUXUE_DOMAIN，Caddy 会自动申请并续期 HTTPS 证书。
+
+{$SUISHOUXUE_DOMAIN} {
+	reverse_proxy suishouxue:8765
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+}

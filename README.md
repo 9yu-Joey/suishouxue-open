@@ -90,8 +90,9 @@ MCP 服务端：让 AI 能够按照规则自动创建和维护知识卡片。
 |------|--------|----------|
 | **Lite** | 刚开始用，想五分钟跑起来 | 本地 Markdown 卡片 + MCP 服务，不依赖任何在线服务 |
 | **Pro**（可选） | 想多设备同步、留修改历史、分享部分卡片 | 在 Lite 基础上：卡片存进你自己的私有 Git 仓库；把带 `public` 标签的卡片生成网站，部署到 GitHub Pages |
+| **Private**（可选） | 想在手机、多台电脑上随时连同一个知识库 | 部署到你自己的服务器和域名，通过 HTTPS 访问，每台设备一个可吊销的访问令牌（单用户） |
 
-Pro 默认关闭，不开启就和 Lite 完全一样。详见 [Pro：同步与展示](docs/05-Pro-同步与展示.md)。
+Pro 和 Private 默认关闭，不开启就和 Lite 完全一样。详见 [Pro：同步与展示](docs/05-Pro-同步与展示.md) · [Private：自托管部署](docs/06-Private-自托管部署.md)。
 
 ---
 
@@ -180,7 +181,8 @@ suishouxue-open/
 │   ├── 02-Lite-快速上手.md
 │   ├── 03-卡片规范详解.md
 │   ├── 04-常见问题与排错.md
-│   └── 05-Pro-同步与展示.md
+│   ├── 05-Pro-同步与展示.md
+│   └── 06-Private-自托管部署.md
 │
 ├── kb-mcp/
 │   ├── server.py            ← MCP 服务端
@@ -192,13 +194,19 @@ suishouxue-open/
 │   ├── kbcore.py            ← 配置与卡片解析（共用）
 │   ├── git_sync.py          ← Pro：Git 同步
 │   ├── build_site.py        ← Pro：静态站点生成
+│   ├── http_app.py          ← Private：HTTPS 后端（令牌认证）
+│   ├── auth_tokens.py       ← Private：访问令牌管理
+│   ├── backup.py            ← Private：备份与恢复
 │   ├── templates/
 │   │   └── github-pages.yml ← Pro：GitHub Pages 发布模板
 │   └── README.md            ← MCP 文档
 │
+├── deploy/                  ← Private：Docker + Caddy 部署模板
+│
 └── tests/
     ├── test_basic_save.py   ← 基础测试
-    └── test_pro.py          ← Pro 测试
+    ├── test_pro.py          ← Pro 测试
+    └── test_private.py      ← Private 测试
 ```
 
 ---
@@ -212,6 +220,7 @@ suishouxue-open/
 | [卡片规范详解](docs/03-卡片规范详解.md) | Core Schema + Profile 完整解读 |
 | [常见问题与排错](docs/04-常见问题与排错.md) | FAQ 和 troubleshooting |
 | [Pro：同步与展示](docs/05-Pro-同步与展示.md) | 私有 Git 仓库同步、GitHub Pages 知识卡网站 |
+| [Private：自托管部署](docs/06-Private-自托管部署.md) | 部署到自己的服务器与域名、访问令牌、备份恢复 |
 
 ---
 

@@ -8,6 +8,21 @@
 
 ## [未发布]
 
+### 新增（Private，可选，默认关闭）
+
+- `server.py --transport http`：Streamable HTTP 自托管模式（路径 `/mcp`，无状态 JSON 响应，服务重启不影响客户端）
+- 静态访问令牌认证（单用户多设备）：`auth_tokens.py create / list / revoke`
+  - 认证不可关闭，没有有效令牌时拒绝启动
+  - 令牌文件只存 SHA-256 哈希，以 0600 权限原子写入；令牌只在创建时显示一次
+  - 常数时间比对；吊销立即生效，无需重启
+- 默认只监听 127.0.0.1；监听其他地址需显式开启 `allow_remote_bind`（程序不处理 HTTPS，必须放在反向代理后）
+- Host / Origin 校验，防 DNS 重绑定；`/healthz` 健康检查不需要令牌、不泄露信息
+- `backup.py`：备份卡片，恢复时永不覆盖已有卡片；拒绝含子目录、符号链接、路径穿越、非 `.md` 或超大条目的备份包
+- `deploy/`：Dockerfile（非 root 用户）、Docker Compose + Caddy 自动 HTTPS 模板；服务端口不映射到宿主机
+- 健康检查增加访问令牌状态
+- 教程《Private：自托管部署》及对应排错条目
+- Private 测试 `tests/test_private.py`
+
 ### 新增（Pro，全部可选，默认关闭）
 
 - Git 同步：`sync.enabled` 开启后，`kb_save` / `kb_update` 成功时自动在卡片仓库做本地提交（只提交本次卡片，不联网）

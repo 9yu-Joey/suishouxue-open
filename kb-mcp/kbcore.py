@@ -77,6 +77,7 @@ def load_config() -> dict:
 
     config["sync"] = _load_sync_config(config.get("sync"))
     config["site"] = _load_site_config(config.get("site"))
+    config["http"] = _load_http_config(config.get("http"))
     return config
 
 
@@ -122,6 +123,32 @@ def _load_site_config(raw) -> dict:
     if os.environ.get("SUISHOUXUE_PUBLISH_TAG"):
         site["publish_tag"] = os.environ["SUISHOUXUE_PUBLISH_TAG"]
     return site
+
+
+def _load_http_config(raw) -> dict:
+    """Private：HTTP 传输设置。只在 --transport http 时使用。"""
+    http = dict(raw) if isinstance(raw, dict) else {}
+    http["host"] = str(http.get("host") or "127.0.0.1")
+    http["port"] = int(http.get("port") or 8765)
+    http["tokens_file"] = str(http.get("tokens_file") or "./tokens.json")
+    http["allow_remote_bind"] = bool(http.get("allow_remote_bind", False))
+    hosts = http.get("allowed_hosts") or []
+    http["allowed_hosts"] = [str(h) for h in hosts] if isinstance(hosts, list) else []
+
+    if os.environ.get("SUISHOUXUE_HTTP_HOST"):
+        http["host"] = os.environ["SUISHOUXUE_HTTP_HOST"]
+    if os.environ.get("SUISHOUXUE_HTTP_PORT"):
+        http["port"] = int(os.environ["SUISHOUXUE_HTTP_PORT"])
+    if os.environ.get("SUISHOUXUE_TOKENS_FILE"):
+        http["tokens_file"] = os.environ["SUISHOUXUE_TOKENS_FILE"]
+    env_remote = _env_bool("SUISHOUXUE_HTTP_ALLOW_REMOTE_BIND")
+    if env_remote is not None:
+        http["allow_remote_bind"] = env_remote
+    if os.environ.get("SUISHOUXUE_ALLOWED_HOSTS"):
+        http["allowed_hosts"] = [
+            h.strip() for h in os.environ["SUISHOUXUE_ALLOWED_HOSTS"].split(",") if h.strip()
+        ]
+    return http
 
 
 def resolve_path(raw: str) -> Path:
