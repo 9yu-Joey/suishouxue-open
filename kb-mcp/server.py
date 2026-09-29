@@ -193,7 +193,7 @@ def _collision_safe_filename(card_id: str) -> str:
 # MCP Server 实例
 # ---------------------------------------------------------------------------
 
-mcp = MCPServer(name="suishouxue-kb", version="0.1.0")
+mcp = MCPServer(name="suishouxue-kb", version="0.2.0")
 
 
 # ---------------------------------------------------------------------------
