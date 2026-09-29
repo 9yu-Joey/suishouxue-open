@@ -8,6 +8,10 @@
 
 ## [未发布]
 
+## [0.2.0] - 2026-09-29
+
+Pro 与 Private 两项可选能力首次发布，均默认关闭；不开启时行为与 0.1.0 的 Lite 完全一致。
+
 ### 新增（Private，可选，默认关闭）
 
 - `server.py --transport http`：Streamable HTTP 自托管模式（路径 `/mcp`，无状态 JSON 响应，服务重启不影响客户端）
