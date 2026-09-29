@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: 9yu-Joey/suishouxue-open
-          ref: main  # 建议改成固定的发布版本 tag（如 v0.2.0），避免上游改动影响你的站点
+          ref: main  # 建议改成固定的发布版本 tag（如 v0.2.1），避免上游改动影响你的站点
           path: suishouxue-open
 
       - uses: actions/setup-python@v5
