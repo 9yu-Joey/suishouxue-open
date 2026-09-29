@@ -317,7 +317,8 @@ class TestHttpServer(unittest.TestCase):
     def post(self, headers):
         import httpx2
         body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
-        return httpx2.post(f"{self.base}/mcp", json=body, timeout=10, headers={
+        # trust_env=False：回环测试必须直连，不能被宿主机的代理设置劫持
+        return httpx2.post(f"{self.base}/mcp", json=body, timeout=10, trust_env=False, headers={
             "accept": "application/json, text/event-stream", **headers})
 
     async def _mcp(self, calls, token=None):
@@ -325,7 +326,7 @@ class TestHttpServer(unittest.TestCase):
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
         headers = {"Authorization": f"Bearer {token or self.token}"}
-        async with httpx2.AsyncClient(headers=headers) as client:
+        async with httpx2.AsyncClient(headers=headers, trust_env=False) as client:
             async with streamable_http_client(f"{self.base}/mcp", http_client=client) as (r, w):
                 async with ClientSession(r, w) as session:
                     await session.initialize()
@@ -342,7 +343,7 @@ class TestHttpServer(unittest.TestCase):
     def test_health_needs_no_token_and_leaks_nothing(self):
         import httpx2
         with self.live():
-            resp = httpx2.get(f"{self.base}/healthz", timeout=10)
+            resp = httpx2.get(f"{self.base}/healthz", timeout=10, trust_env=False)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"status": "ok"})
 
