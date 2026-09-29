@@ -94,6 +94,70 @@ class TestTokenStore(unittest.TestCase):
         self.store.revoke("laptop")
         self.store.create("laptop")  # 吊销后可以重新签发
 
+    def test_concurrent_create_cannot_resurrect_revoked_token(self):
+        """签发写回前另一个进程吊销了旧设备：吊销不能被旧列表覆盖掉"""
+        import threading
+        from auth_tokens import TokenStore
+        lost = self.store.create("lost-phone")
+        original_save = self.store._save
+        paused, resume = threading.Event(), threading.Event()
+
+        def slow_save(tokens):
+            paused.set()
+            resume.wait(5)
+            original_save(tokens)
+
+        self.store._save = slow_save
+        creator = threading.Thread(target=lambda: self.store.create("laptop"))
+        creator.start()
+        self.assertTrue(paused.wait(5))
+        revoker = threading.Thread(target=lambda: TokenStore(self.path).revoke("lost-phone"))
+        revoker.start()
+        revoker.join(0.3)
+        self.assertTrue(revoker.is_alive(), "吊销应当等待签发事务结束")
+        resume.set()
+        creator.join(5)
+        revoker.join(5)
+
+        fresh = TokenStore(self.path)
+        self.assertIsNone(fresh.verify(lost))
+        self.assertEqual([e["name"] for e in fresh.entries() if not e["revoked"]], ["laptop"])
+
+    def test_parallel_processes_keep_every_change(self):
+        """多个进程同时签发和吊销，最终结果不丢任何一次修改"""
+        import subprocess
+        from auth_tokens import TokenStore
+        for i in range(8):
+            self.store.create(f"old{i}")
+        script = (
+            "import sys; sys.path.insert(0, sys.argv[1]);"
+            "from auth_tokens import TokenStore; s = TokenStore(sys.argv[2]);"
+            "s.create(sys.argv[3]) if sys.argv[4] == 'c' else s.revoke(sys.argv[3])"
+        )
+        kb = str(Path(__file__).parent.parent / "kb-mcp")
+        procs = [subprocess.Popen([sys.executable, "-c", script, kb, str(self.path), f"new{i}", "c"])
+                 for i in range(8)]
+        procs += [subprocess.Popen([sys.executable, "-c", script, kb, str(self.path), f"old{i}", "r"])
+                  for i in range(8)]
+        for proc in procs:
+            self.assertEqual(proc.wait(30), 0)
+        state = {e["name"]: e["revoked"] for e in TokenStore(self.path).entries()}
+        self.assertEqual(sorted(n for n, r in state.items() if r is None),
+                         sorted(f"new{i}" for i in range(8)))
+        self.assertTrue(all(state[f"old{i}"] for i in range(8)))
+
+    def test_corrupt_token_file_is_rejected(self):
+        """结构不对的令牌条目不能算作有效令牌"""
+        import auth_tokens
+        for content in ['{"tokens": [{}]}', '{"tokens": [{"name": "x", "hash": "abc"}]}',
+                        '{"tokens": {}}', '[]', 'not json']:
+            self.path.write_text(content, encoding="utf-8")
+            store = auth_tokens.TokenStore(self.path)
+            with self.assertRaises(ValueError, msg=content):
+                store.active_count()
+            with self.assertRaises(ValueError, msg=content):
+                store.verify("ssx_anything")
+
     def test_cli_shows_token_once_and_list_hides_it(self):
         import auth_tokens
         out = io.StringIO()
@@ -140,6 +204,39 @@ class TestStartupChecks(unittest.TestCase):
         http_app.check_startup(_http_config(host="0.0.0.0", allow_remote_bind=True), self.store)
         for host in ["127.0.0.1", "localhost", "::1", "[::1]"]:
             http_app.check_startup(_http_config(host=host), self.store)
+
+    def test_quoted_false_does_not_enable_remote_bind(self):
+        """YAML 里带引号的 "false" 不能被当成 True 而绕过启动检查"""
+        import http_app
+        import kbcore
+        self.store.create("x")
+        config = kbcore._load_http_config({"host": "0.0.0.0", "allow_remote_bind": "false"})
+        self.assertIs(config["allow_remote_bind"], False)
+        with self.assertRaises(http_app.StartupError):
+            http_app.check_startup(config, self.store)
+        self.assertIs(kbcore._load_http_config({"allow_remote_bind": "true"})["allow_remote_bind"], True)
+        self.assertIs(kbcore._load_http_config({"allow_remote_bind": None})["allow_remote_bind"], False)
+        for bad in ["maybe", "fasle", 2, [], "enabled"]:
+            with self.assertRaises(ValueError, msg=bad):
+                kbcore._load_http_config({"allow_remote_bind": bad})
+        self.assertIs(kbcore._load_sync_config({"enabled": "false"})["enabled"], False)
+        with self.assertRaises(ValueError):
+            kbcore._load_sync_config({"enabled": "nope"})
+
+    def test_invalid_env_bool_is_rejected(self):
+        import kbcore
+        os.environ["SUISHOUXUE_HTTP_ALLOW_REMOTE_BIND"] = "sure"
+        try:
+            with self.assertRaises(ValueError):
+                kbcore._load_http_config(None)
+        finally:
+            del os.environ["SUISHOUXUE_HTTP_ALLOW_REMOTE_BIND"]
+
+    def test_corrupt_token_file_refuses_startup(self):
+        import http_app
+        self.store.path.write_text('{"tokens": [{}]}', encoding="utf-8")
+        with self.assertRaises(http_app.StartupError):
+            http_app.check_startup(_http_config(), self.store)
 
     def test_http_config_from_env(self):
         import kbcore
@@ -273,6 +370,13 @@ class TestHttpServer(unittest.TestCase):
             self.store.revoke("laptop")
             self.assertEqual(self.post({"authorization": f"Bearer {self.token}"}).status_code, 401)
 
+    def test_corrupt_token_file_fails_closed_at_runtime(self):
+        """运行中令牌文件被写坏：请求一律 401，而不是 500 或放行"""
+        with self.live():
+            self.store.path.write_text('{"tokens": [{}]}', encoding="utf-8")
+            resp = self.post({"authorization": f"Bearer {self.token}"})
+        self.assertEqual(resp.status_code, 401)
+
     def test_dns_rebinding_host_rejected(self):
         with self.live():
             resp = self.post({"authorization": f"Bearer {self.token}", "host": "evil.example"})
@@ -366,6 +470,52 @@ class TestBackup(unittest.TestCase):
                 self.backup.restore(self._evil_archive(name, kind=kind), target)
         self.assertFalse((self.tmp / "escape.md").exists())
         self.assertEqual(list(target.iterdir()) if target.exists() else [], [])
+
+    def test_backup_refuses_cards_restore_would_reject(self):
+        """本工具生成的备份一定能恢复：超限卡片在备份阶段就拒绝"""
+        original = self.backup.MAX_CARD_BYTES
+        self.backup.MAX_CARD_BYTES = 10
+        try:
+            (self.cards / "large.md").write_bytes(b"x" * 11)
+            archive = self.tmp / "big.tar.gz"
+            with self.assertRaises(self.backup.BackupError):
+                self.backup.backup(self.cards, archive)
+            self.assertFalse(archive.exists())
+            self.assertFalse(archive.with_name(archive.name + ".partial").exists())
+            (self.cards / "large.md").write_bytes(b"x" * 10)  # 恰好等于上限
+            self.backup.backup(self.cards, archive)
+            self.assertIn("large.md", self.backup.restore(archive, self.tmp / "r")["restored"])
+        finally:
+            self.backup.MAX_CARD_BYTES = original
+
+    def test_hidden_cards_are_left_out_of_backup(self):
+        (self.cards / ".draft.md").write_text("hidden", encoding="utf-8")
+        archive = self.tmp / "b.tar.gz"
+        self.assertEqual(self.backup.backup(self.cards, archive), 2)
+        self.backup.restore(archive, self.tmp / "r")
+
+    def _bomb(self, count, size):
+        archive = self.tmp / f"bomb-{count}-{size}.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            for i in range(count):
+                info = tarfile.TarInfo(f"z{i}.md")
+                info.size = size
+                tar.addfile(info, io.BytesIO(b"\0" * size))
+        return archive
+
+    def test_decompression_bomb_limits(self):
+        """数量或总解压量超限：整个恢复被拒绝，且一张卡都不写"""
+        saved = (self.backup.MAX_CARDS, self.backup.MAX_TOTAL_BYTES)
+        self.backup.MAX_CARDS, self.backup.MAX_TOTAL_BYTES = 5, 1000
+        try:
+            for archive in [self._bomb(6, 1), self._bomb(3, 400)]:
+                target = self.tmp / ("t-" + archive.stem)
+                with self.assertRaises(self.backup.BackupError):
+                    self.backup.restore(archive, target)
+                self.assertFalse(target.exists() and any(target.iterdir()))
+            self.backup.restore(self._bomb(5, 200), self.tmp / "ok")
+        finally:
+            self.backup.MAX_CARDS, self.backup.MAX_TOTAL_BYTES = saved
 
     def test_rejects_oversized_card(self):
         original = self.backup.MAX_CARD_BYTES

@@ -61,7 +61,11 @@ def is_loopback(host: str) -> bool:
 
 def check_startup(http_config: dict, store: TokenStore) -> None:
     """启动前的安全检查。"""
-    if store.active_count() == 0:
+    try:
+        active = store.active_count()
+    except (ValueError, OSError) as exc:
+        raise StartupError(f"无法读取令牌文件，拒绝启动: {exc}") from exc
+    if active == 0:
         raise StartupError(
             f"没有可用的访问令牌（{store.path}）。"
             f"请先运行: python auth_tokens.py create <设备名>"
@@ -129,7 +133,12 @@ class BearerAuth:
                     token = credential.strip()
                 break
 
-        device = self.store.verify(token) if token else None
+        try:
+            device = self.store.verify(token) if token else None
+        except (ValueError, OSError):
+            # 令牌文件损坏或读不到：一律拒绝（fail closed）
+            logger.error("令牌文件无法读取，已拒绝请求")
+            device = None
         if device is None:
             # 不记录令牌内容
             logger.warning("拒绝未授权请求: %s %s", scope.get("method"), scope.get("path"))

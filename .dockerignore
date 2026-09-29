@@ -8,6 +8,7 @@ kb-mcp/config.yaml
 kb-mcp/cards/
 kb-mcp/site/
 kb-mcp/tokens.json
+kb-mcp/tokens.json.lock
 cards/
 _site/
 *.tar.gz

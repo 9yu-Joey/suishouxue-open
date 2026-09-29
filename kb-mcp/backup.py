@@ -19,8 +19,13 @@
 把卡片目录顶层的 .md 卡片打包成 tar.gz，或从备份包恢复。
 
 恢复永不覆盖：目标里已有同名但内容不同的卡片会被跳过并报告，
-内容相同的直接跳过。备份包里任何不是顶层 .md 普通文件的条目
-（子目录、符号链接、带 ../ 的路径）都会被拒绝。
+内容相同的直接跳过。
+
+安全检查（备份与恢复使用同一套规则，本工具生成的备份一定能恢复）：
+  - 只接受顶层、非隐藏的 .md 普通文件；子目录、符号链接、带 ../ 的路径
+    都会让整个恢复被拒绝
+  - 单张卡片、卡片数量、解压后总大小都有上限，防止解压炸弹
+  - 恢复分两遍：第一遍只读条目头做检查，全部通过后第二遍才写卡片
 
 令牌文件不在备份范围内：换服务器后请重新签发令牌。
 
@@ -40,11 +45,39 @@ from pathlib import Path
 from kbcore import load_config, resolve_path
 
 
-MAX_CARD_BYTES = 10 * 1024 * 1024  # 单张卡片上限，防止恶意备份包撑爆磁盘
+# 备份与恢复共用同一套上限，保证本工具生成的备份一定能恢复，
+# 同时让恶意备份包（解压炸弹）无法耗尽内存或磁盘。
+MAX_CARD_BYTES = 10 * 1024 * 1024    # 单张卡片
+MAX_CARDS = 50_000                   # 卡片数量
+MAX_TOTAL_BYTES = 256 * 1024 * 1024  # 解压后总大小
 
 
 class BackupError(RuntimeError):
     """备份或恢复失败。"""
+
+
+def _name_ok(name: str) -> bool:
+    return ("/" not in name and "\\" not in name
+            and not name.startswith(".") and name.endswith(".md"))
+
+
+class _Budget:
+    """累计数量与大小，超过上限立即报错。"""
+
+    def __init__(self, action: str):
+        self.action = action
+        self.count = 0
+        self.total = 0
+
+    def add(self, name: str, size: int) -> None:
+        if size > MAX_CARD_BYTES:
+            raise BackupError(f"{name!r} 超过单张卡片上限 {MAX_CARD_BYTES} 字节，已拒绝{self.action}")
+        self.count += 1
+        self.total += size
+        if self.count > MAX_CARDS:
+            raise BackupError(f"卡片数量超过上限 {MAX_CARDS}，已拒绝{self.action}")
+        if self.total > MAX_TOTAL_BYTES:
+            raise BackupError(f"卡片总大小超过上限 {MAX_TOTAL_BYTES} 字节，已拒绝{self.action}")
 
 
 def backup(cards_dir: Path, out: Path) -> int:
@@ -52,35 +85,52 @@ def backup(cards_dir: Path, out: Path) -> int:
         raise BackupError(f"卡片目录不存在: {cards_dir}")
     if out.exists():
         raise BackupError(f"备份文件已存在，不会覆盖: {out}")
-    cards = sorted(p for p in cards_dir.glob("*.md") if p.is_file() and not p.is_symlink())
+    cards = sorted(
+        p for p in cards_dir.glob("*.md")
+        if p.is_file() and not p.is_symlink() and _name_ok(p.name)
+    )
+    # 先检查，确认生成的备份一定能被 restore 接受，再开始写
+    budget = _Budget("备份")
+    for card in cards:
+        budget.add(card.name, card.stat().st_size)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(out.name + ".partial")
-    with tarfile.open(tmp, "w:gz") as tar:
-        for card in cards:
-            tar.add(card, arcname=card.name, recursive=False)
+    try:
+        with tarfile.open(tmp, "w:gz") as tar:
+            for card in cards:
+                tar.add(card, arcname=card.name, recursive=False)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     tmp.replace(out)
     return len(cards)
 
 
-def _safe_members(tar: tarfile.TarFile) -> list[tarfile.TarInfo]:
-    members = tar.getmembers()
-    for m in members:
-        if (not m.isfile() or "/" in m.name or "\\" in m.name
-                or m.name.startswith(".") or not m.name.endswith(".md")):
-            raise BackupError(f"备份包含不允许的条目，已拒绝整个恢复: {m.name!r}")
-        if m.size > MAX_CARD_BYTES:
-            raise BackupError(f"备份中的 {m.name!r} 超过 {MAX_CARD_BYTES} 字节，已拒绝整个恢复")
-    return members
+def _validate_archive(archive: Path) -> None:
+    """第一遍：逐个读取条目头做检查，不写任何文件；超限立即停止读取。"""
+    budget = _Budget("整个恢复")
+    with tarfile.open(archive, "r:gz") as tar:
+        while (member := tar.next()) is not None:
+            if not member.isfile() or not _name_ok(member.name):
+                raise BackupError(f"备份包含不允许的条目，已拒绝整个恢复: {member.name!r}")
+            budget.add(member.name, member.size)
 
 
 def restore(archive: Path, cards_dir: Path) -> dict:
     if not archive.is_file():
         raise BackupError(f"备份文件不存在: {archive}")
+    _validate_archive(archive)
+
     cards_dir.mkdir(parents=True, exist_ok=True)
     restored, identical, conflicts = [], [], []
+    budget = _Budget("整个恢复")
     with tarfile.open(archive, "r:gz") as tar:
-        for member in _safe_members(tar):
-            data = tar.extractfile(member).read()
+        while (member := tar.next()) is not None:
+            # 写入前再校验一次，防止两遍之间备份包被替换
+            if not member.isfile() or not _name_ok(member.name):
+                raise BackupError(f"备份包含不允许的条目，已停止恢复: {member.name!r}")
+            budget.add(member.name, member.size)
+            data = tar.extractfile(member).read(MAX_CARD_BYTES + 1)
             target = cards_dir / member.name
             if target.exists():
                 if target.read_bytes() == data:

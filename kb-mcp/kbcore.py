@@ -40,13 +40,29 @@ _REMOTE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
 _BRANCH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]{0,127}$")
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def strict_bool(value, name: str) -> bool:
+    """严格解析布尔开关。
+
+    YAML 里带引号的 "false" 是字符串，bool("false") 会得到 True；
+    安全开关不能这样放行，所以无法识别的值一律报错。
+    """
+    if value is None:  # YAML 中留空：按关闭处理
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in _TRUE_VALUES | _FALSE_VALUES:
+        return value.strip().lower() in _TRUE_VALUES
+    raise ValueError(f"{name} 必须是 true 或 false")
 
 
 def _env_bool(name: str) -> bool | None:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
         return None
-    return raw.strip().lower() in _TRUE_VALUES
+    return strict_bool(raw, name)
 
 
 def load_config() -> dict:
@@ -84,7 +100,7 @@ def load_config() -> dict:
 def _load_sync_config(raw) -> dict:
     """Pro：Git 同步设置。默认关闭，关闭时行为与 Lite 完全一致。"""
     sync = dict(raw) if isinstance(raw, dict) else {}
-    sync["enabled"] = bool(sync.get("enabled", False))
+    sync["enabled"] = strict_bool(sync.get("enabled", False), "sync.enabled")
     sync["remote"] = str(sync.get("remote") or "origin")
     sync["branch"] = str(sync.get("branch") or "main")
 
@@ -131,7 +147,9 @@ def _load_http_config(raw) -> dict:
     http["host"] = str(http.get("host") or "127.0.0.1")
     http["port"] = int(http.get("port") or 8765)
     http["tokens_file"] = str(http.get("tokens_file") or "./tokens.json")
-    http["allow_remote_bind"] = bool(http.get("allow_remote_bind", False))
+    http["allow_remote_bind"] = strict_bool(
+        http.get("allow_remote_bind", False), "http.allow_remote_bind"
+    )
     hosts = http.get("allowed_hosts") or []
     http["allowed_hosts"] = [str(h) for h in hosts] if isinstance(hosts, list) else []
 

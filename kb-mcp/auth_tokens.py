@@ -25,6 +25,9 @@ Private 模式的静态访问令牌（Bearer token）。
   - 比对使用 hmac.compare_digest（常数时间）。
   - 令牌文件以 0600 权限原子写入。
   - 每次校验都会检查文件是否被修改，吊销无需重启即可生效。
+  - 签发与吊销在跨进程文件锁内完成“读取—修改—写回”，并发操作不会互相覆盖
+    （否则可能把已吊销的令牌写回成有效）。
+  - 令牌文件结构损坏时直接报错，服务拒绝启动，校验一律失败。
 
 用法:
     python auth_tokens.py create laptop     # 创建，明文只显示这一次
@@ -35,6 +38,7 @@ Private 模式的静态访问令牌（Bearer token）。
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import hmac
 import json
@@ -48,6 +52,42 @@ from pathlib import Path
 
 TOKEN_PREFIX = "ssx_"
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
+_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+class TokenFileError(ValueError):
+    """令牌文件损坏或结构不对。"""
+
+
+def _check_entry(entry) -> None:
+    if (not isinstance(entry, dict)
+            or not isinstance(entry.get("name"), str) or not _NAME_RE.match(entry["name"])
+            or not isinstance(entry.get("hash"), str) or not _HASH_RE.match(entry["hash"])
+            or not isinstance(entry.get("revoked"), (str, type(None)))):
+        raise TokenFileError("令牌文件中有结构不正确的条目，请检查或重新签发令牌")
+
+
+@contextlib.contextmanager
+def _file_lock(lock_path: Path):
+    """跨进程互斥锁（POSIX 用 flock，Windows 用 msvcrt）。"""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+b") as fh:
+        if os.name == "nt":
+            import msvcrt
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def _hash(token: str) -> str:
@@ -72,10 +112,15 @@ class TokenStore:
             return []
         key = (stat.st_mtime_ns, stat.st_size)
         if key != self._cache_key:
-            data = json.loads(self.path.read_text(encoding="utf-8") or "{}")
-            tokens = data.get("tokens", [])
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8") or "{}")
+            except json.JSONDecodeError as exc:
+                raise TokenFileError(f"令牌文件不是合法的 JSON: {self.path}") from exc
+            tokens = data.get("tokens", []) if isinstance(data, dict) else None
             if not isinstance(tokens, list):
-                raise ValueError(f"令牌文件格式错误: {self.path}")
+                raise TokenFileError(f"令牌文件格式错误: {self.path}")
+            for entry in tokens:
+                _check_entry(entry)
             self._cache_key, self._cache = key, tokens
         return self._cache
 
@@ -104,6 +149,15 @@ class TokenStore:
 
     # -- 写入 ---------------------------------------------------------------
 
+    @contextlib.contextmanager
+    def _transaction(self):
+        """持锁读取最新内容，交给调用方修改，再在同一把锁内写回。"""
+        with _file_lock(self.path.with_name(self.path.name + ".lock")):
+            self._cache_key = None  # 强制重新读取，不用锁外的缓存
+            tokens = [dict(e) for e in self._load()]
+            yield tokens
+            self._save(tokens)
+
     def _save(self, tokens: list[dict]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".tokens-")
@@ -121,30 +175,27 @@ class TokenStore:
         """创建令牌并返回明文。同名的有效令牌不能重复创建。"""
         if not _NAME_RE.match(name):
             raise ValueError("设备名只允许字母、数字和 . _ -，且以字母或数字开头")
-        tokens = list(self._load())
-        if any(e.get("name") == name and not e.get("revoked") for e in tokens):
-            raise ValueError(f"设备 '{name}' 已有有效令牌，请先吊销或换个名字")
         token = TOKEN_PREFIX + secrets.token_urlsafe(32)
-        tokens.append({
-            "name": name,
-            "hash": _hash(token),
-            "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "revoked": None,
-        })
-        self._save(tokens)
+        with self._transaction() as tokens:
+            if any(e.get("name") == name and not e.get("revoked") for e in tokens):
+                raise ValueError(f"设备 '{name}' 已有有效令牌，请先吊销或换个名字")
+            tokens.append({
+                "name": name,
+                "hash": _hash(token),
+                "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "revoked": None,
+            })
         return token
 
     def revoke(self, name: str) -> int:
         """吊销该设备名下所有有效令牌，返回吊销数量。"""
-        tokens = list(self._load())
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         count = 0
-        for entry in tokens:
-            if entry.get("name") == name and not entry.get("revoked"):
-                entry["revoked"] = now
-                count += 1
-        if count:
-            self._save(tokens)
+        with self._transaction() as tokens:
+            for entry in tokens:
+                if entry.get("name") == name and not entry.get("revoked"):
+                    entry["revoked"] = now
+                    count += 1
         return count
 
 
