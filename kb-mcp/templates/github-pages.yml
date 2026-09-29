@@ -1,0 +1,75 @@
+# =============================================================================
+# 随手学 Pro · GitHub Pages 发布模板
+#
+# 用法：把本文件复制到「你自己的卡片仓库」的 .github/workflows/ 目录下，
+# 不要放进 suishouxue-open 仓库。完整步骤见 docs/05-Pro-同步与展示.md。
+#
+# ⚠️ 私有仓库 ≠ 私有网站
+#    即使卡片仓库是 private，GitHub Pages 生成的网站通常也是任何人都能访问的。
+#    只有 tags 里带发布标签（默认 public）的卡片会被生成，其余卡片不会进入站点。
+#    发布前请确认这些卡片可以被所有人看到。
+#
+# 默认只能手动触发（Actions 页面 → Run workflow）。想在每次同步后自动发布，
+# 再取消下面 push 触发器的注释。
+# =============================================================================
+
+name: 发布随手学知识卡站点
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出卡片仓库
+        uses: actions/checkout@v4
+        with:
+          path: cards
+
+      - name: 检出随手学 Open
+        uses: actions/checkout@v4
+        with:
+          repository: 9yu-Joey/suishouxue-open
+          ref: main  # 建议改成固定的发布版本 tag，避免上游改动影响你的站点
+          path: suishouxue-open
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装站点依赖
+        run: pip install -r suishouxue-open/kb-mcp/requirements-pro.txt
+
+      - name: 生成站点（只包含带 public 标签的卡片）
+        run: >-
+          python suishouxue-open/kb-mcp/build_site.py
+          --cards cards --out _site --tag public --title "我的随手学知识库"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

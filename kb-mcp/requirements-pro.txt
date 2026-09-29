@@ -1,0 +1,7 @@
+# 随手学 kb-mcp · Pro 额外依赖
+# 只有生成静态站点（build_site.py）才需要；Git 同步只依赖系统里的 git 命令。
+#
+#   pip install -r requirements.txt -r requirements-pro.txt
+
+pyyaml>=6.0
+markdown-it-py>=3,<5

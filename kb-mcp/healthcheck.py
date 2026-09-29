@@ -32,7 +32,8 @@ from pathlib import Path
 
 # 复用 server.py 的配置
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from server import CARDS_DIR, PROFILES_DIR, DEFAULT_PROFILE, _BASE_DIR
+import git_sync
+from server import CARDS_DIR, PROFILES_DIR, DEFAULT_PROFILE, SYNC, _BASE_DIR
 
 
 def main() -> int:
@@ -44,6 +45,7 @@ def main() -> int:
     2. 卡片目录（cards_dir）是否存在且可写
     3. 至少一个 Profile YAML 是否存在
     4. 默认 Profile 是否存在
+    5. （Pro，仅在开启 sync 时）卡片目录是否为独立 Git 仓库且配置了 remote
 
     Returns:
         0 = 健康，1 = 存在问题
@@ -96,6 +98,21 @@ def main() -> int:
     else:
         issues.append(f"默认 Profile '{DEFAULT_PROFILE}' 不存在")
         print(f"[ERR] 默认 Profile '{DEFAULT_PROFILE}' 不存在")
+
+    # --- 5. Pro：Git 同步 ---
+    if SYNC["enabled"]:
+        state = git_sync.status(CARDS_DIR, SYNC["remote"], SYNC["branch"])
+        if state["status"] == "ready":
+            print(f"[OK]  Git 同步已启用：{SYNC['remote']} → {state['remote_url']}"
+                  f"（分支 {SYNC['branch']}）")
+        elif state["status"] == "no_remote":
+            issues.append(f"卡片仓库没有名为 '{SYNC['remote']}' 的 remote")
+            print(f"[ERR] 卡片仓库没有名为 '{SYNC['remote']}' 的 remote")
+        else:
+            issues.append("已开启 sync，但卡片目录不是独立的 Git 仓库")
+            print("[ERR] 已开启 sync，但卡片目录不是独立的 Git 仓库")
+    else:
+        print("[INFO] Git 同步未启用（Lite 模式）")
 
     # --- 汇总 ---
     print()

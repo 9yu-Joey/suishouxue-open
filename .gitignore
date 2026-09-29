@@ -21,6 +21,10 @@ kb-mcp/config.yaml
 cards/
 kb-mcp/cards/
 
+# Pro 静态站点生成结果
+kb-mcp/site/
+_site/
+
 # IDE
 .vscode/
 .idea/
