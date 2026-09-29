@@ -518,6 +518,57 @@ class TestBackup(unittest.TestCase):
         finally:
             self.backup.MAX_CARDS, self.backup.MAX_TOTAL_BYTES = saved
 
+    def _pax_archive(self, pax_headers, name="card.md", data=b"x"):
+        archive = self.tmp / "pax.tar.gz"
+        with tarfile.open(archive, "w:gz", format=tarfile.PAX_FORMAT) as tar:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.pax_headers = pax_headers
+            tar.addfile(info, io.BytesIO(data))
+        return archive
+
+    def test_pax_extended_header_counts_toward_limits(self):
+        """PAX 扩展头也受上限约束：小压缩包里塞大扩展头会被拒绝，且不写任何卡"""
+        archive = self._pax_archive({"comment": "x" * (1024 * 1024)})
+        self.assertLess(archive.stat().st_size, 4096)
+        target = self.tmp / "pax-target"
+        with self.assertRaises(self.backup.BackupError):
+            self.backup.restore(archive, target)
+        self.assertFalse(target.exists() and any(target.iterdir()))
+
+        # 陆行舟的原始复现：总量上限调到 1024 字节时同样必须拒绝
+        saved = self.backup.MAX_TOTAL_BYTES
+        self.backup.MAX_TOTAL_BYTES = 1024
+        try:
+            with self.assertRaises(self.backup.BackupError):
+                self.backup.restore(archive, self.tmp / "pax-target-2")
+        finally:
+            self.backup.MAX_TOTAL_BYTES = saved
+
+    def test_huge_numeric_pax_header_rejected_quickly(self):
+        """超大数字扩展头不能让解析长时间占满 CPU"""
+        archive = self._pax_archive({"mtime": "9" * (4 * 1024 * 1024)})
+        started = time.monotonic()
+        with self.assertRaises(self.backup.BackupError):
+            self.backup.restore(archive, self.tmp / "slow")
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_long_and_unicode_names_roundtrip(self):
+        """本工具生成的合法扩展头（长文件名、中文名）仍能正常恢复"""
+        long_name = "长" * 40 + "-" + "x" * 60 + ".md"  # 超过 tar 普通头的 100 字节，需要扩展头
+        (self.cards / long_name).write_text("long", encoding="utf-8")
+        archive = self.tmp / "b.tar.gz"
+        self.backup.backup(self.cards, archive)
+        result = self.backup.restore(archive, self.tmp / "r")
+        self.assertIn(long_name, result["restored"])
+        self.assertIn("我的 卡片.md", result["restored"])
+
+    def test_corrupt_archive_reports_backup_error(self):
+        archive = self.tmp / "broken.tar.gz"
+        archive.write_bytes(b"\x1f\x8b not really gzip")
+        with self.assertRaises(self.backup.BackupError):
+            self.backup.restore(archive, self.tmp / "r")
+
     def test_rejects_oversized_card(self):
         original = self.backup.MAX_CARD_BYTES
         self.backup.MAX_CARD_BYTES = 10

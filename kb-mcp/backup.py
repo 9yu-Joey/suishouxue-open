@@ -25,6 +25,7 @@
   - 只接受顶层、非隐藏的 .md 普通文件；子目录、符号链接、带 ../ 的路径
     都会让整个恢复被拒绝
   - 单张卡片、卡片数量、解压后总大小都有上限，防止解压炸弹
+  - 在 tarfile 解析之前对解压流逐字节计量，扩展头等元数据同样受限
   - 恢复分两遍：第一遍只读条目头做检查，全部通过后第二遍才写卡片
 
 令牌文件不在备份范围内：换服务器后请重新签发令牌。
@@ -37,6 +38,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import sys
 import tarfile
 from datetime import datetime, timezone
@@ -50,6 +52,9 @@ from kbcore import load_config, resolve_path
 MAX_CARD_BYTES = 10 * 1024 * 1024    # 单张卡片
 MAX_CARDS = 50_000                   # 卡片数量
 MAX_TOTAL_BYTES = 256 * 1024 * 1024  # 解压后总大小
+# 相邻两张卡片之间允许的元数据（tar 头、PAX/GNU 扩展头、填充）。
+# 本工具生成的备份每张卡只有几百字节元数据；tarfile 读取缓冲也在此范围内。
+MAX_META_BYTES = 64 * 1024
 
 
 class BackupError(RuntimeError):
@@ -106,14 +111,62 @@ def backup(cards_dir: Path, out: Path) -> int:
     return len(cards)
 
 
-def _validate_archive(archive: Path) -> None:
-    """第一遍：逐个读取条目头做检查，不写任何文件；超限立即停止读取。"""
+def _padded(size: int) -> int:
+    return (size + 511) // 512 * 512
+
+
+class _MeteredStream:
+    """对 gzip 解压后的字节流计量，在 tarfile 解析任何头部之前就设好上限。
+
+    tarfile 会先自行解压并解析 PAX/GNU 扩展头，之后才把普通条目交给我们检查；
+    扩展头因此不在 _Budget 的统计里。这里按“步”计量：每一步是一张卡片的数据
+    加上下一张卡片的全部头部，元数据最多 MAX_META_BYTES；另有整体上限。
+    """
+
+    def __init__(self, raw):
+        self.raw = raw
+        self.total = 0
+        self.total_limit = MAX_TOTAL_BYTES + (MAX_CARDS + 1) * MAX_META_BYTES
+        self.step = 0
+        self.step_limit = MAX_META_BYTES
+
+    def begin_step(self, allowance: int) -> None:
+        self.step = 0
+        self.step_limit = allowance
+
+    def read(self, size: int = -1) -> bytes:
+        if size is None or size < 0:
+            size = self.step_limit - self.step + 1  # 绝不无上限地读取
+        data = self.raw.read(size)
+        self.step += len(data)
+        self.total += len(data)
+        if self.step > self.step_limit or self.total > self.total_limit:
+            raise BackupError("备份包含超出上限的元数据或内容（疑似解压炸弹），已拒绝整个恢复")
+        return data
+
+
+def _walk(archive: Path, on_member) -> None:
+    """流式遍历备份包，逐条校验后交给 on_member(tar, member)。"""
     budget = _Budget("整个恢复")
-    with tarfile.open(archive, "r:gz") as tar:
-        while (member := tar.next()) is not None:
-            if not member.isfile() or not _name_ok(member.name):
-                raise BackupError(f"备份包含不允许的条目，已拒绝整个恢复: {member.name!r}")
-            budget.add(member.name, member.size)
+    with gzip.open(archive, "rb") as raw:
+        stream = _MeteredStream(raw)
+        try:
+            with tarfile.open(fileobj=stream, mode="r|") as tar:
+                while (member := tar.next()) is not None:
+                    if not member.isfile() or not _name_ok(member.name):
+                        raise BackupError(
+                            f"备份包含不允许的条目，已拒绝整个恢复: {member.name!r}")
+                    budget.add(member.name, member.size)
+                    # 下一步：本卡数据 + 下一张卡的全部头部
+                    stream.begin_step(_padded(member.size) + MAX_META_BYTES)
+                    on_member(tar, member)
+        except (tarfile.TarError, EOFError, OSError) as exc:
+            raise BackupError(f"备份文件损坏或格式不对: {exc}") from exc
+
+
+def _validate_archive(archive: Path) -> None:
+    """第一遍：只做检查，不写任何文件；超限立即停止读取。"""
+    _walk(archive, lambda tar, member: None)
 
 
 def restore(archive: Path, cards_dir: Path) -> dict:
@@ -123,24 +176,22 @@ def restore(archive: Path, cards_dir: Path) -> dict:
 
     cards_dir.mkdir(parents=True, exist_ok=True)
     restored, identical, conflicts = [], [], []
-    budget = _Budget("整个恢复")
-    with tarfile.open(archive, "r:gz") as tar:
-        while (member := tar.next()) is not None:
-            # 写入前再校验一次，防止两遍之间备份包被替换
-            if not member.isfile() or not _name_ok(member.name):
-                raise BackupError(f"备份包含不允许的条目，已停止恢复: {member.name!r}")
-            budget.add(member.name, member.size)
-            data = tar.extractfile(member).read(MAX_CARD_BYTES + 1)
-            target = cards_dir / member.name
-            if target.exists():
-                if target.read_bytes() == data:
-                    identical.append(member.name)
-                else:
-                    conflicts.append(member.name)
-                continue
-            with open(target, "xb") as fh:  # x：文件已存在时绝不覆盖
-                fh.write(data)
-            restored.append(member.name)
+
+    # 第二遍：同样的流式校验（防止两遍之间备份包被替换），通过后才写入
+    def write(tar, member):
+        data = tar.extractfile(member).read(member.size)
+        target = cards_dir / member.name
+        if target.exists():
+            if target.read_bytes() == data:
+                identical.append(member.name)
+            else:
+                conflicts.append(member.name)
+            return
+        with open(target, "xb") as fh:  # x：文件已存在时绝不覆盖
+            fh.write(data)
+        restored.append(member.name)
+
+    _walk(archive, write)
     return {"restored": restored, "identical": identical, "conflicts": conflicts}
 
 
