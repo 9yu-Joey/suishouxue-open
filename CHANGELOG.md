@@ -14,8 +14,9 @@
 - 新工具 `kb_sync`：fetch → merge → push；`action="status"` 查看本地状态
   - 冲突时取消合并并列出冲突文件，本地卡片不被覆盖
   - 推送失败时保留本地提交，可再次同步重试；永不 force push
-  - 卡片目录必须是独立的 Git 仓库根目录，不会把卡片提交进上级仓库
-  - Git 在非交互模式运行，不会卡住等待密码；返回内容中的 remote 凭据会被隐藏
+  - 卡片目录必须是拥有自己 `.git` 目录的独立仓库根目录；上级仓库的子目录、linked worktree、子模块都会被拒绝，不会把卡片提交进其他仓库
+  - 联网时强制 SSH 非交互（即使用户设置了 `BatchMode=no`，仍保留其密钥与代理参数），并脱离控制终端，不会卡住等待密码
+  - 返回内容、错误信息与健康检查输出中，remote 地址的用户信息、查询参数和片段都会被隐藏；配置校验错误不回显原值
 - 静态站点生成器 `build_site.py`：只发布 tags 带 `public`（可配置）的卡片；卡片中的原始 HTML 会被转义；拒绝覆盖非站点目录
 - GitHub Pages 发布模板 `kb-mcp/templates/github-pages.yml`（默认仅手动触发）
 - `requirements-pro.txt`（站点生成所需的 markdown-it-py）

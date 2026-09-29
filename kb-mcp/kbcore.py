@@ -101,13 +101,16 @@ def _load_sync_config(raw) -> dict:
 
 def validate_sync_names(remote: str, branch: str) -> None:
     """remote 必须是 remote 名称（如 origin），不接受 URL；分支名不得含 ".."。"""
+    # 错误信息不回显原值：用户可能误把带 token 的 URL 填了进来
     if not _REMOTE_NAME_RE.match(remote):
         raise ValueError(
-            f"sync.remote '{remote}' 不合法：请填写 Git remote 名称（如 origin），"
-            f"不要填写 URL，更不要把 token 写进配置"
+            "sync.remote 不合法：请填写 Git remote 名称（如 origin），"
+            "不要填写 URL，更不要把 token 写进配置"
         )
     if not _BRANCH_NAME_RE.match(branch) or ".." in branch:
-        raise ValueError(f"sync.branch '{branch}' 不合法")
+        raise ValueError(
+            "sync.branch 不合法：只允许字母、数字和 . _ / -，不能以 - 开头，不能包含 .."
+        )
 
 
 def _load_site_config(raw) -> dict:

@@ -45,20 +45,51 @@ class GitError(RuntimeError):
     """git 命令执行失败。"""
 
 
+def _batch_ssh_command(base: str) -> str:
+    """在 ssh 命令的程序名后面紧接着插入 -o BatchMode=yes。
+
+    ssh 对同一选项只采用第一次出现的值，所以必须插在用户自己的参数之前，
+    这样用户写的 -o BatchMode=no 也会失效；其余参数（密钥、代理等）原样保留。
+    非 ssh 程序或以引号开头的命令不做改写，此时靠脱离终端与禁用 askpass 兜底。
+    """
+    stripped = base.strip()
+    if not stripped or stripped[0] in "'\"":
+        return base
+    program, _, rest = stripped.partition(" ")
+    if Path(program).name.lower() not in ("ssh", "ssh.exe"):
+        return base
+    return f"{program} -o BatchMode=yes {rest}".rstrip()
+
+
+def _network_env(repo: Path, env: dict) -> dict:
+    """联网命令的额外环境：强制 SSH 非交互，同时保留用户的 SSH 配置。"""
+    base = env.get("GIT_SSH_COMMAND")
+    if not base:
+        configured = _git(repo, "config", "--get", "core.sshCommand", check=False)
+        base = configured.stdout.strip() or env.get("GIT_SSH") or "ssh"
+    env["GIT_SSH_COMMAND"] = _batch_ssh_command(base)
+    env["SSH_ASKPASS_REQUIRE"] = "never"  # 不弹 askpass 窗口
+    return env
+
+
 def _git(
     repo: Path,
     *args: str,
     timeout: int = LOCAL_TIMEOUT,
     check: bool = True,
+    network: bool = False,
 ) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     # MCP 走 stdio：git 绝不能停下来等密码输入，否则会卡死整个服务
     env["GIT_TERMINAL_PROMPT"] = "0"
-    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+    if network:
+        env = _network_env(repo, env)
     try:
         proc = subprocess.run(
             ["git", "-c", "core.quotePath=false", "-C", str(repo), *args],
             stdin=subprocess.DEVNULL,  # 不能继承 MCP 的 stdin
+            # 脱离控制终端：ssh 无法再从 /dev/tty 读取密码
+            start_new_session=(os.name != "nt"),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -76,9 +107,27 @@ def _git(
     return proc
 
 
+_URL_RE = re.compile(
+    r"(?P<scheme>[A-Za-z][\w+.\-]*://)"
+    r"(?P<userinfo>[^/?#@\s]*@)?"
+    r"(?P<rest>[^?#\s'\"]*)"
+    r"(?P<tail>[?#][^\s'\"]*)?"
+)
+
+
 def redact(text: str) -> str:
-    """去掉 URL 中的用户名/密码，防止 token 出现在返回给 AI 的内容里。"""
-    return re.sub(r"(\w+://)[^/@\s]+@", r"\1***@", text)
+    """隐藏 URL 里可能携带凭据的部分（用户信息、查询参数、片段）。
+
+    防止 token 出现在返回给 AI 的内容、错误信息或健康检查输出里。
+    """
+    def _safe(m: re.Match) -> str:
+        return (
+            m.group("scheme")
+            + ("***@" if m.group("userinfo") else "")
+            + m.group("rest")
+            + ("?***" if m.group("tail") else "")
+        )
+    return _URL_RE.sub(_safe, text)
 
 
 def is_repo(cards_dir: Path) -> bool:
@@ -90,12 +139,23 @@ def is_repo(cards_dir: Path) -> bool:
     if not cards_dir.is_dir():
         return False
     try:
-        proc = _git(cards_dir, "rev-parse", "--show-toplevel", check=False)
+        proc = _git(cards_dir, "rev-parse", "--show-toplevel", "--git-common-dir",
+                    check=False)
     except GitError:
         return False
-    if proc.returncode != 0:
+    lines = proc.stdout.splitlines()
+    if proc.returncode != 0 or len(lines) != 2:
         return False
-    return Path(proc.stdout.strip()).resolve() == cards_dir.resolve()
+    root = cards_dir.resolve()
+    if Path(lines[0]).resolve() != root:
+        return False
+    # 还必须拥有自己的 .git 目录：linked worktree（以及子模块）的仓库数据
+    # 存放在别的仓库里，会和那个仓库共用同一个远端，因此也拒绝
+    common_dir = Path(lines[1])
+    if not common_dir.is_absolute():
+        common_dir = cards_dir / common_dir
+    own_git_dir = root / ".git"
+    return own_git_dir.is_dir() and common_dir.resolve() == own_git_dir
 
 
 def _has_head(repo: Path) -> bool:
@@ -154,8 +214,8 @@ def _pending_card_files(repo: Path) -> list[str]:
 
 
 def _tracked_dirty(repo: Path) -> list[str]:
-    out = _git(repo, "status", "--porcelain", "--untracked-files=no").stdout
-    return [line[3:] for line in out.splitlines() if line.strip()]
+    out = _git(repo, "status", "--porcelain", "-z", "--untracked-files=no").stdout
+    return [entry[3:] for entry in out.split("\0") if len(entry) > 3]
 
 
 def status(cards_dir: Path, remote: str, branch: str) -> dict:
@@ -170,6 +230,7 @@ def status(cards_dir: Path, remote: str, branch: str) -> dict:
         "cards_dir": str(cards_dir),
         "local_branch": local_branch.stdout.strip() or None,
         "remote": remote,
+        # 只返回隐藏了凭据位置的地址，绝不返回原始 remote URL
         "remote_url": redact(url.stdout.strip()) if url.returncode == 0 else None,
         "branch": branch,
         "uncommitted_cards": len(_pending_card_files(cards_dir)),
@@ -210,10 +271,10 @@ def _sync(repo: Path, remote: str, branch: str) -> dict:
     # 2. fetch
     try:
         heads = _git(repo, "ls-remote", "--heads", remote, f"refs/heads/{branch}",
-                     timeout=NETWORK_TIMEOUT).stdout.strip()
+                     timeout=NETWORK_TIMEOUT, network=True).stdout.strip()
         if heads:
             _git(repo, "fetch", "--quiet", remote, f"refs/heads/{branch}",
-                 timeout=NETWORK_TIMEOUT)
+                 timeout=NETWORK_TIMEOUT, network=True)
     except GitError as exc:
         return {"status": "fetch_failed", "message": str(exc),
                 "committed_local": committed_local,
@@ -231,8 +292,11 @@ def _sync(repo: Path, remote: str, branch: str) -> dict:
                          "-m", f"kb: 合并 {remote}/{branch} 的卡片", "FETCH_HEAD",
                          check=False)
             if merge.returncode != 0:
-                conflicts = _git(repo, "diff", "--name-only", "--diff-filter=U",
-                                 check=False).stdout.split()
+                conflicts = [
+                    name for name in _git(repo, "diff", "--name-only", "-z",
+                                          "--diff-filter=U", check=False).stdout.split("\0")
+                    if name
+                ]
                 _git(repo, "merge", "--abort", check=False)
                 return {
                     "status": "conflict" if conflicts else "merge_failed",
@@ -252,7 +316,7 @@ def _sync(repo: Path, remote: str, branch: str) -> dict:
     if pushed:
         try:
             _git(repo, "push", "--quiet", remote, f"HEAD:refs/heads/{branch}",
-                 timeout=NETWORK_TIMEOUT)
+                 timeout=NETWORK_TIMEOUT, network=True)
         except GitError as exc:
             return {"status": "push_failed", "message": str(exc),
                     "pulled": pulled, "committed_local": committed_local,

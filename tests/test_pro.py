@@ -130,6 +130,92 @@ class TestSyncConfig(unittest.TestCase):
             "https://***@github.com/a/b.git",
         )
 
+    def test_redact_query_and_fragment(self):
+        """查询参数、片段里的凭据同样隐藏（任意 Git 托管都可能这样传 token）"""
+        import git_sync
+        for url in [
+            "https://example.invalid/c.git?token=FAKE_TOKEN_FOR_TEST",
+            "https://example.invalid/c.git#FAKE_TOKEN_FOR_TEST",
+            "fatal: unable to access 'https://u:FAKE_TOKEN_FOR_TEST@example.invalid/c.git?t=FAKE_TOKEN_FOR_TEST/': 403",
+        ]:
+            self.assertNotIn("FAKE_TOKEN_FOR_TEST", git_sync.redact(url))
+        self.assertEqual(git_sync.redact("git@github.com:a/b.git"), "git@github.com:a/b.git")
+
+    def test_invalid_remote_error_does_not_echo_value(self):
+        """配置里误填了带 token 的 URL：启动错误不能把它回显出来"""
+        import kbcore
+        for remote, branch in [
+            ("https://user:FAKE_TOKEN_FOR_TEST@example.invalid/cards.git", "main"),
+            ("origin", "FAKE_TOKEN_FOR_TEST..x"),
+        ]:
+            with self.assertRaises(ValueError) as ctx:
+                kbcore.validate_sync_names(remote, branch)
+            self.assertNotIn("FAKE_TOKEN_FOR_TEST", str(ctx.exception))
+
+
+class TestSshNonInteractive(unittest.TestCase):
+    """联网时强制 SSH 非交互，但保留用户自己的密钥/代理参数"""
+
+    def test_user_batchmode_no_is_overridden(self):
+        import git_sync
+        cmd = git_sync._batch_ssh_command("ssh -i ~/.ssh/cards_key -o BatchMode=no")
+        self.assertTrue(cmd.startswith("ssh -o BatchMode=yes "), cmd)
+        self.assertIn("-i ~/.ssh/cards_key", cmd)
+
+    def test_ssh_path_and_plain(self):
+        import git_sync
+        self.assertEqual(git_sync._batch_ssh_command("ssh"), "ssh -o BatchMode=yes")
+        self.assertTrue(git_sync._batch_ssh_command("/usr/bin/ssh -p 2222")
+                        .startswith("/usr/bin/ssh -o BatchMode=yes"))
+        self.assertEqual(git_sync._batch_ssh_command("plink -batch"), "plink -batch")
+
+    @unittest.skipUnless(_HAS_GIT, "需要 git")
+    def test_network_env_covers_inherited_and_configured_commands(self):
+        import git_sync
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            git(tmp, "init", "-q")
+            env = git_sync._network_env(tmp, {"GIT_SSH_COMMAND": "ssh -o BatchMode=no"})
+            self.assertTrue(env["GIT_SSH_COMMAND"].startswith("ssh -o BatchMode=yes"))
+            self.assertEqual(env["SSH_ASKPASS_REQUIRE"], "never")
+
+            git(tmp, "config", "core.sshCommand", "ssh -i /keys/cards")
+            env = git_sync._network_env(tmp, {})
+            self.assertEqual(env["GIT_SSH_COMMAND"], "ssh -o BatchMode=yes -i /keys/cards")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(_HAS_GIT, "需要 git")
+    def test_network_calls_use_forced_env(self):
+        """真实的联网调用路径拿到的是强制非交互的环境，且脱离控制终端"""
+        import git_sync
+        seen = []
+        real_run = subprocess.run
+
+        def spy(cmd, **kwargs):
+            seen.append((cmd, kwargs))
+            return real_run(cmd, **kwargs)
+
+        tmp = Path(tempfile.mkdtemp())
+        saved = os.environ.get("GIT_SSH_COMMAND")
+        os.environ["GIT_SSH_COMMAND"] = "ssh -o BatchMode=no"
+        git_sync.subprocess.run = spy
+        try:
+            git(tmp, "init", "-q")
+            git_sync._git(tmp, "ls-remote", str(tmp), check=False, network=True)
+        finally:
+            git_sync.subprocess.run = real_run
+            if saved is None:
+                os.environ.pop("GIT_SSH_COMMAND", None)
+            else:
+                os.environ["GIT_SSH_COMMAND"] = saved
+            shutil.rmtree(tmp, ignore_errors=True)
+        _, kwargs = [c for c in seen if "ls-remote" in c[0]][0]
+        self.assertTrue(kwargs["env"]["GIT_SSH_COMMAND"].startswith("ssh -o BatchMode=yes"))
+        self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+        if os.name != "nt":
+            self.assertTrue(kwargs["start_new_session"])
+
 
 # ---------------------------------------------------------------------------
 # 本地提交
@@ -177,6 +263,22 @@ class TestLocalCommit(_TempEnv):
         self.assertEqual(result["status"], "saved")
         self.assertFalse(result["sync"]["committed"])
         self.assertEqual(git(parent, "rev-list", "--count", "HEAD"), "1")
+
+    def test_linked_worktree_is_rejected(self):
+        """项目仓库的 linked worktree 与项目共用仓库数据和远端，不能当卡片仓库"""
+        remote = self.make_remote()
+        project = self.make_clone("project", remote)
+        git(project, "commit", "-q", "--allow-empty", "-m", "init")
+        git(project, "push", "-q", "origin", "main")
+        cards = self.tmp / "cards-worktree"
+        git(project, "worktree", "add", "-q", "-b", "cards", str(cards))
+        self.use_cards(cards)
+
+        result = self.save("Private Note")
+        self.assertFalse(result["sync"]["committed"])
+        self.assertEqual(self.server.kb_sync()["status"], "not_repo")
+        self.assertEqual(git(cards, "rev-list", "--count", "HEAD"), "1")
+        self.assertEqual(git(remote, "rev-list", "--count", "main"), "1")
 
     def test_plain_directory_saves_with_warning(self):
         self.use_cards(self.tmp / "plain")
@@ -312,11 +414,36 @@ class TestKbSync(_TempEnv):
 
     def test_status_redacts_remote_credentials(self):
         cards = self.make_clone("a", self.make_remote())
-        git(cards, "remote", "set-url", "origin", "https://user:FAKE_TOKEN_FOR_TEST@example.invalid/x.git")
         self.use_cards(cards)
-        result = self.server.kb_sync(action="status")
-        self.assertEqual(result["status"], "ready")
-        self.assertNotIn("FAKE_TOKEN_FOR_TEST", str(result))
+        for url in [
+            "https://user:FAKE_TOKEN_FOR_TEST@example.invalid/x.git",
+            "https://example.invalid/x.git?token=FAKE_TOKEN_FOR_TEST",
+        ]:
+            git(cards, "remote", "set-url", "origin", url)
+            result = self.server.kb_sync(action="status")
+            self.assertEqual(result["status"], "ready")
+            self.assertNotIn("FAKE_TOKEN_FOR_TEST", str(result))
+
+    def test_conflict_reports_filenames_with_spaces(self):
+        """手动建的卡片文件名带空格，冲突列表里也要是完整路径"""
+        remote = self.make_remote()
+        a = self.make_clone("a", remote)
+        b = self.make_clone("b", remote)
+        card = "---\nid: general-my-card\ntitle: my card\n---\n\n"
+        (a / "my card.md").write_text(card + "base\n", encoding="utf-8")
+        self.use_cards(a)
+        self.server.kb_sync()
+        self.use_cards(b)
+        self.server.kb_sync()
+        (b / "my card.md").write_text(card + "from B\n", encoding="utf-8")
+        self.server.kb_sync()
+
+        (a / "my card.md").write_text(card + "from A\n", encoding="utf-8")
+        self.use_cards(a)
+        result = self.server.kb_sync()
+        self.assertEqual(result["status"], "conflict", result)
+        self.assertEqual(result["files"], ["my card.md"])
+        self.assertIn("from A", (a / "my card.md").read_text(encoding="utf-8"))
 
     def test_missing_remote(self):
         cards = self.tmp / "solo"
