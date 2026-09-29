@@ -57,6 +57,18 @@ Pro 默认关闭，关闭时与 Lite 行为完全一致。
 
 完整教程：[Pro：同步与展示](../docs/05-Pro-同步与展示.md)
 
+## Private（可选）
+
+`python server.py --transport http` 以 Streamable HTTP 方式提供服务，路径为 `/mcp`，默认监听 `127.0.0.1:8765`。
+
+- **认证不可关闭**：请求必须带 `Authorization: Bearer <令牌>`，没有有效令牌时服务拒绝启动。令牌用 `python auth_tokens.py create|list|revoke` 管理，文件里只存哈希，吊销立即生效。
+- **本程序不处理 HTTPS**：监听非本机地址需要显式开启 `http.allow_remote_bind`，并放在 HTTPS 反向代理后面。部署模板见仓库的 `deploy/`（Docker Compose + Caddy）。
+- **防 DNS 重绑定**：`http.allowed_hosts` 填你的域名。
+- **健康检查**：`GET /healthz` 不需要令牌，只返回 `{"status": "ok"}`。
+- **备份与恢复**：`python backup.py backup|restore`，恢复永不覆盖已有卡片。
+
+完整教程：[Private：自托管部署](../docs/06-Private-自托管部署.md)
+
 ## 连接 AI 客户端
 
 ### Claude Desktop
@@ -84,7 +96,7 @@ ChatGPT 桌面端和 Codex CLI 均支持 MCP stdio 传输，配置方式类似�
 
 ## 版本说明
 
-v0.1 提供本地 Markdown 存储与 MCP stdio 服务。Pro 在此基础上增加可选的 Git 同步和静态站点生成。
+v0.1 提供本地 Markdown 存储与 MCP stdio 服务。Pro 在此基础上增加可选的 Git 同步和静态站点生成；Private 增加带令牌认证的 HTTP 自托管模式。
 
 ## 许可证
 

@@ -1,0 +1,17 @@
+# 不要把本地配置、令牌、个人卡片打进镜像
+.git
+**/__pycache__
+**/*.pyc
+.env
+**/.env
+kb-mcp/config.yaml
+kb-mcp/cards/
+kb-mcp/site/
+kb-mcp/tokens.json
+kb-mcp/tokens.json.lock
+cards/
+_site/
+*.tar.gz
+tests/
+docs/
+examples/

@@ -25,6 +25,12 @@ kb-mcp/cards/
 kb-mcp/site/
 _site/
 
+# Private 令牌与备份
+kb-mcp/tokens.json
+kb-mcp/tokens.json.lock
+*.tar.gz
+deploy/.env
+
 # IDE
 .vscode/
 .idea/

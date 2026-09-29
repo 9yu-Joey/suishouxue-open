@@ -29,6 +29,8 @@ AI 客户端（Claude、ChatGPT 等）通信。
   kb_guide  — 加载 Profile 字段定义，引导 AI 生成卡片
   kb_sync   — （Pro，可选）与用户自己的私有 Git 仓库同步卡片
 
+传输方式：默认 stdio；`--transport http` 为 Private 自托管模式（强制令牌认证）。
+
 要求 Python 3.10+
 """
 
@@ -575,5 +577,37 @@ def kb_sync(action: str = "sync") -> dict:
 # 入口
 # ---------------------------------------------------------------------------
 
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="随手学 MCP Server")
+    parser.add_argument("--transport", choices=["stdio", "http"], default="stdio",
+                        help="stdio（默认，本地客户端）或 http（Private 自托管，需要访问令牌）")
+    parser.add_argument("--host", help="HTTP 监听地址（默认 127.0.0.1）")
+    parser.add_argument("--port", type=int, help="HTTP 端口（默认 8765）")
+    args = parser.parse_args(argv)
+
+    if args.transport == "stdio":
+        mcp.run(transport="stdio")
+        return 0
+
+    import http_app
+    from auth_tokens import TokenStore
+
+    http_config = dict(CONFIG["http"])
+    if args.host:
+        http_config["host"] = args.host
+    if args.port:
+        http_config["port"] = args.port
+    store = TokenStore(_resolve_path(http_config["tokens_file"]))
+    try:
+        http_app.run(mcp, http_config, store)
+    except http_app.StartupError as exc:
+        print(f"[ERR] {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    raise SystemExit(main())

@@ -1,0 +1,46 @@
+# 随手学 Private · 自托管部署模板
+#
+# 结构：公网 443 → Caddy（自动 HTTPS 证书）→ 内部网络 → 随手学服务
+# 随手学服务的 8765 端口不映射到宿主机，只有 Caddy 能访问。
+#
+# 使用前：cp deploy/.env.example deploy/.env 并填写你自己的域名。
+# 完整步骤见 docs/06-Private-自托管部署.md
+
+name: suishouxue
+
+services:
+  suishouxue:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      # 只在内部网络监听；对外的 HTTPS 由 Caddy 负责
+      SUISHOUXUE_HTTP_HOST: "0.0.0.0"
+      SUISHOUXUE_HTTP_ALLOW_REMOTE_BIND: "true"
+      # 防 DNS 重绑定：只接受发往你域名的请求
+      SUISHOUXUE_ALLOWED_HOSTS: ${SUISHOUXUE_DOMAIN:?请在 deploy/.env 中设置 SUISHOUXUE_DOMAIN}
+    volumes:
+      - suishouxue-data:/data
+    expose:
+      - "8765"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SUISHOUXUE_DOMAIN: ${SUISHOUXUE_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - suishouxue
+
+volumes:
+  suishouxue-data:   # 知识卡与令牌文件都在这里，删除它等于删除所有卡片
+  caddy-data:
+  caddy-config:

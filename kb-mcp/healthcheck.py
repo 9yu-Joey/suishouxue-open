@@ -33,7 +33,8 @@ from pathlib import Path
 # 复用 server.py 的配置
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import git_sync
-from server import CARDS_DIR, PROFILES_DIR, DEFAULT_PROFILE, SYNC, _BASE_DIR
+from auth_tokens import TokenStore
+from server import CARDS_DIR, CONFIG, PROFILES_DIR, DEFAULT_PROFILE, SYNC, _BASE_DIR, _resolve_path
 
 
 def main() -> int:
@@ -46,6 +47,7 @@ def main() -> int:
     3. 至少一个 Profile YAML 是否存在
     4. 默认 Profile 是否存在
     5. （Pro，仅在开启 sync 时）卡片目录是否为独立 Git 仓库且配置了 remote
+    6. （Private）访问令牌数量（仅提示，不影响 stdio 模式）
 
     Returns:
         0 = 健康，1 = 存在问题
@@ -113,6 +115,19 @@ def main() -> int:
             print("[ERR] 已开启 sync，但卡片目录不是独立的 Git 仓库")
     else:
         print("[INFO] Git 同步未启用（Lite 模式）")
+
+    # --- 6. Private：访问令牌 ---
+    tokens_path = _resolve_path(CONFIG["http"]["tokens_file"])
+    try:
+        active = TokenStore(tokens_path).active_count()
+    except (ValueError, OSError) as exc:
+        issues.append(f"令牌文件无法读取: {exc}")
+        print(f"[ERR] 令牌文件无法读取: {exc}")
+    else:
+        if active:
+            print(f"[OK]  Private：{active} 个有效访问令牌")
+        else:
+            print("[INFO] Private：还没有有效访问令牌（仅 --transport http 需要）")
 
     # --- 汇总 ---
     print()

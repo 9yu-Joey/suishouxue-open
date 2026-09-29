@@ -61,3 +61,24 @@ site:
   publish_tag: "public"
   title: "我的随手学知识库"
   output_dir: "./site"
+
+# ---------------------------------------------------------------------------
+# Private：HTTP 自托管（只在 `python server.py --transport http` 时使用）
+#
+# 认证不可关闭：没有有效访问令牌时服务拒绝启动。
+# 本程序不处理 HTTPS，公网访问必须放在 HTTPS 反向代理后面（见 deploy/）。
+# 详见 docs/06-Private-自托管部署.md
+# ---------------------------------------------------------------------------
+http:
+  # 默认只监听本机
+  host: "127.0.0.1"
+  port: 8765
+
+  # 访问令牌文件（只存哈希）。用 `python auth_tokens.py create <设备名>` 签发
+  tokens_file: "./tokens.json"
+
+  # 监听非本机地址（如 0.0.0.0）必须显式开启，并确保前面有 HTTPS 反向代理
+  allow_remote_bind: false
+
+  # 允许的 Host（你的域名），用于防 DNS 重绑定
+  allowed_hosts: []
