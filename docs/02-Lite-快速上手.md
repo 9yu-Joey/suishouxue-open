@@ -25,6 +25,8 @@ cp .env.example .env
 
 打开 `config.yaml`，确认 `cards_dir` 指向你想存放知识卡片的目录（默认是 `./cards`，会自动创建）。
 
+`.env` 是另一种写法：里面的条目默认都是注释，想用哪一项就去掉那一行开头的 `# `。两边都写了同一项时，`.env` 优先；如果 AI 客户端的 MCP 配置里也设了同名环境变量，那一项最优先。
+
 ## 第三步：连接 AI 客户端
 
 以 Claude Desktop 为例，打开配置文件 `claude_desktop_config.json`，添加：

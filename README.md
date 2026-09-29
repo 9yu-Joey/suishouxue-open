@@ -114,6 +114,8 @@ cp config.example.yaml config.yaml
 cp .env.example .env
 ```
 
+两份文件二选一改就行，默认配置可以直接用。`.env` 里的条目默认都是注释，想用哪一项就去掉那一行开头的 `# `。优先级：系统环境变量 > `.env` > `config.yaml`。
+
 ### 3. 配置 AI 客户端
 
 以 Claude Desktop 为例，在 `claude_desktop_config.json` 中添加：

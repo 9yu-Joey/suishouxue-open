@@ -65,12 +65,47 @@ def _env_bool(name: str) -> bool | None:
     return strict_bool(raw, name)
 
 
+_DOTENV_LINE_RE = re.compile(r"^(?:export\s+)?(SUISHOUXUE_[A-Z0-9_]+)\s*=\s*(.*)$")
+
+
+def load_dotenv(path: Path) -> list[str]:
+    """读取 .env 文件，把其中的 SUISHOUXUE_* 变量放进环境变量，返回生效的变量名。
+
+    - 只接受 SUISHOUXUE_ 开头的变量，其他行一律忽略，
+      避免 .env 意外改动代理、PATH 等影响本程序或 git 的变量；
+    - 已经存在的环境变量优先，.env 不会覆盖它；
+    - 支持 # 注释、空行、export 前缀和成对的单/双引号。
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (FileNotFoundError, IsADirectoryError):
+        return []
+    applied = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = _DOTENV_LINE_RE.match(line)
+        if not match:
+            continue
+        key, value = match.group(1), match.group(2).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        elif " #" in value:  # 行尾注释
+            value = value.split(" #", 1)[0].rstrip()
+        if key not in os.environ:
+            os.environ[key] = value
+            applied.append(key)
+    return applied
+
+
 def load_config() -> dict:
     """加载配置文件 config.yaml，如不存在则使用默认值。
 
     所有相对路径统一以 kb-mcp/ 目录为基准解析。
-    环境变量可覆盖配置文件中的对应设置。
+    优先级：系统环境变量 > kb-mcp/.env > config.yaml > 默认值。
     """
+    load_dotenv(BASE_DIR / ".env")
     config_path = BASE_DIR / "config.yaml"
     if config_path.exists():
         with open(config_path, "r", encoding="utf-8") as fh:
