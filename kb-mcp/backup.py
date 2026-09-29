@@ -51,7 +51,7 @@ from kbcore import load_config, resolve_path
 # 同时让恶意备份包（解压炸弹）无法耗尽内存或磁盘。
 MAX_CARD_BYTES = 10 * 1024 * 1024    # 单张卡片
 MAX_CARDS = 50_000                   # 卡片数量
-MAX_TOTAL_BYTES = 256 * 1024 * 1024  # 解压后总大小
+MAX_TOTAL_BYTES = 256 * 1024 * 1024  # 卡片内容总量（不含元数据，元数据见下）
 # 相邻两张卡片之间允许的元数据（tar 头、PAX/GNU 扩展头、填充）。
 # 本工具生成的备份每张卡只有几百字节元数据；tarfile 读取缓冲也在此范围内。
 MAX_META_BYTES = 64 * 1024
