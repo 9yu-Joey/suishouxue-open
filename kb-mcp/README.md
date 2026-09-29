@@ -19,7 +19,7 @@ pip install -r requirements.txt
 cp config.example.yaml config.yaml
 ```
 
-根据需要编辑 `config.yaml`，默认配置即可直接使用。也可通过环境变量 `SUISHOUXUE_CARDS_DIR`、`SUISHOUXUE_PROFILES_DIR`、`SUISHOUXUE_DEFAULT_PROFILE` 覆盖配置（Pro 相关变量见 `.env.example`）。环境变量需要在启动 server 的环境里设置，例如写进 MCP 客户端配置的 `env` 字段。
+根据需要编辑 `config.yaml`，默认配置即可直接使用。也可通过环境变量 `SUISHOUXUE_CARDS_DIR`、`SUISHOUXUE_PROFILES_DIR`、`SUISHOUXUE_DEFAULT_PROFILE` 覆盖配置（Pro / Private 相关变量见 `.env.example`）。环境变量可以写在 MCP 客户端配置的 `env` 字段里，也可以写进 `kb-mcp/.env`（启动时自动读取，只认 `SUISHOUXUE_` 开头的变量）。优先级：系统环境变量 > `.env` > `config.yaml` > 默认值。
 
 ### 3. 健康检查
 

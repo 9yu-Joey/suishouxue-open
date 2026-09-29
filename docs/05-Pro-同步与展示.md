@@ -60,7 +60,7 @@ sync:
   branch: "main"
 ```
 
-也可以不改文件，改用环境变量。注意 `.env` 文件不会被自动读取，环境变量要写在 AI 客户端的 MCP 配置里：
+也可以在 `kb-mcp/.env` 里去掉 `SUISHOUXUE_CARDS_DIR`、`SUISHOUXUE_SYNC_ENABLED` 两行开头的 `# ` 并填写；或者直接写在 AI 客户端的 MCP 配置里：
 
 ```json
 {
